@@ -20,7 +20,7 @@ from ur_analytic_ik import ur5e
 from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
 from robot_imitation_glue.base import BaseEnv
 from robot_imitation_glue.grippers.schunk_process import SchunkGripperProcess
-from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscriber, initialize_ipc
+from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscriber
 
 # env consists of 1 zed scene camera, 1 wrist  realsense cameras and a UR5e robot + Schunk gripper
 
@@ -74,9 +74,6 @@ class UR5eStation(BaseEnv):
         robot_awaitable = self.robot.move_to_joint_configuration(
             HOME_JOINTS
         )  # do not wait, let cameras initialize first
-
-        # set up cameras
-        initialize_ipc()
 
         logger.info("Creating wrist camera publisher.")
         self._wrist_camera_publisher = RGBCameraPublisher(

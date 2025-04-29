@@ -14,7 +14,7 @@ from airo_camera_toolkit.utils.image_converter import ImageConverter
 from airo_ipc.cyclone_shm.idl_shared_memory.base_idl import BaseIDL
 from airo_ipc.cyclone_shm.patterns.ddsreader import DDSReader
 from airo_ipc.cyclone_shm.patterns.sm_reader import SMReader
-from airo_ipc.framework.framework import IpcKind, initialize_ipc
+from airo_ipc.framework.framework import IpcKind
 from airo_ipc.framework.node import Node
 from airo_typing import CameraIntrinsicsMatrixType, CameraResolutionType, NumpyFloatImageType, NumpyIntImageType
 from cyclonedds.domain import DomainParticipant
