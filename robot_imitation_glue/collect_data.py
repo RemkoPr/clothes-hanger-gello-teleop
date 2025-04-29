@@ -145,21 +145,22 @@ def collect_data(  # noqa: C901
         vis_img = observation["scene_image"].copy()
 
         # visualize state is_recording, is_paused
-        cv2.putText(
-            vis_img, f"recording = {state.is_recording}", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-        )
-        cv2.putText(vis_img, f"Paused: {state.is_paused}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        if state.is_recording:
+            cv2.putText(vis_img, "RECORDING", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        if state.is_paused:
+            cv2.putText(vis_img, "PAUSED", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
         cv2.putText(
             vis_img,
-            f"num episodes collected: {dataset_recorder.n_recorded_episodes}",
+            f" # episodes: {dataset_recorder.n_recorded_episodes}",
             (10, 50),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (255, 255, 255),
-            1,
+            2,
         )
         rr.log("image", rr.Image(vis_img, rr.ColorModel.RGB))
         rr.log("wrist_image", rr.Image(observation["wrist_image"], rr.ColorModel.RGB))
+        rr.log("scene_image", rr.Image(observation["scene_image"], rr.ColorModel.RGB))
 
         # if paused, do not collect teleop or execute action
         if state.is_paused:
@@ -172,6 +173,10 @@ def collect_data(  # noqa: C901
         new_robot_target_se3_pose, new_gripper_target_width = teleop_to_pose_converter(
             target_pose, target_gripper_state, action
         )
+
+        # store the actions in absolute format, to facilitate any action conversion later on.
+        # observation["target_abs_robot_se3e_pose"] = new_robot_target_se3_pose
+        # observation["target_abs_gripper_pose"] = new_gripper_target_width
 
         policy_formatted_action = abs_pose_to_policy_action(
             target_pose, target_gripper_state, new_robot_target_se3_pose, new_gripper_target_width

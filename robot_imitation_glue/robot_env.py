@@ -49,7 +49,6 @@ class UR3eStation(BaseEnv):
         # set up cameras
         initialize_ipc()
 
-        # Put from here ...
         logger.info("Creating wrist camera publisher.")
         self._wrist_camera_publisher = RGBCameraPublisher(
             CameraFactory.create_wrist_camera,
@@ -64,7 +63,6 @@ class UR3eStation(BaseEnv):
             WRIST_CAM_RESOLUTION_TOPIC,
             WRIST_CAM_RGB_TOPIC,
         )
-        # ... till here in comments if don't want to use the wrist camera
 
         logger.info("Creating scene camera publisher.")
         self._scene_camera_publisher = RGBCameraPublisher(
@@ -81,7 +79,7 @@ class UR3eStation(BaseEnv):
             SCENE_CAM_RGB_TOPIC,
         )
 
-        # self._wrist_camera_subscriber = self._scene_camera_subscriber # Put this out of comments if don't want to use the wrist camera
+        # self._wrist_camera_subscriber = self._scene_camera_subscriber
         # wait for first images
         time.sleep(2)
 
@@ -96,6 +94,9 @@ class UR3eStation(BaseEnv):
 
         # rr.init("ur3e-station",spawn=True)
 
+    def get_joint_configuration(self):
+        return self.robot.get_joint_configuration()
+
     def get_robot_pose_euler(self):
         """
         pose as [x,y,z,rx,ry,rz] in robot base frame using Euler angles
@@ -106,9 +107,6 @@ class UR3eStation(BaseEnv):
         return np.concatenate((position, rotation_vector), axis=0)
 
     def get_robot_pose_se3(self):
-        """
-        pose as 4x4 homogeneous transformation matrix in robot base frame
-        """
         return self.robot.get_tcp_pose()
 
     def get_gripper_opening(self):

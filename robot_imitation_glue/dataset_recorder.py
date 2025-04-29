@@ -77,6 +77,9 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
             elif len(shape) == 1:
                 features[key] = {"dtype": "float32", "shape": shape, "names": None}
             elif len(shape) == 3:
+                if not shape[0] == 3:
+                    # not hannel first! reorder shape
+                    shape = (shape[2], shape[0], shape[1])
                 if use_videos:
                     features[key] = {"dtype": "video", "names": ["channel", "height", "width"], "shape": shape}
                 else:
@@ -97,7 +100,8 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
             print(f"Dataset {dataset_name} already exists. Loading it.")
             self.lerobot_dataset = LeRobotDataset(repo_id=dataset_name, root=self.root_dataset_dir)
             self.lerobot_dataset.start_image_writer(num_processes=0, num_threads=16)
-            self._n_recorded_episodes = len(self.lerobot_dataset.episode_data_index)
+            self._n_recorded_episodes = len(self.lerobot_dataset.episode_data_index["from"])
+            print(f"Loaded {self._n_recorded_episodes} episodes.")
         else:
             print(f"Dataset {dataset_name} does not exist. Creating it.")
             self.lerobot_dataset = LeRobotDataset.create(
@@ -128,7 +132,7 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
 
         for key in self.state_keys:
             frame[key] = torch.tensor(obs[key])
-        self.lerobot_dataset.add_frame(frame)
+        self.lerobot_dataset.add_frame(frame)  # This is slow
 
     def save_episode(self):
         # TODO add frames here to dataset
