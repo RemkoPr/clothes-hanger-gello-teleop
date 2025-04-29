@@ -14,7 +14,6 @@ dependencies:
     - pynput
     - ur-analytic-ik
     - pyrealsense2
-    -  airo-ipc/
     -  airo-mono/airo-typing
     -  airo-mono/airo-dataset-tools
     -  airo-mono/airo-spatial-algebra
