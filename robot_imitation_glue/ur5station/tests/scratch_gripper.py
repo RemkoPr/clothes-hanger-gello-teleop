@@ -12,22 +12,13 @@ SCHUNK_GRIPPER_HOST2 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:8:1.0-port0,1
 
 
 #os.environ["BKS_HOST"] = SCHUNK_GRIPPER_HOST1
-gripper1 = SchunkGripperProcess(SCHUNK_GRIPPER_HOST1)
-gripper2 = SchunkGripperProcess(SCHUNK_GRIPPER_HOST2)
+#gripper1 = SchunkGripperProcess(SCHUNK_GRIPPER_HOST1)
+gripper2 = SchunkGripperProcess(SCHUNK_GRIPPER_HOST1)
 time.sleep(2)
-gripper1.max_grasp_force = gripper1.gripper_specs.min_force  # minimal force for EGK40 is 55N
-gripper1.speed = gripper1.gripper_specs.max_speed
+#gripper1.max_grasp_force = gripper1.gripper_specs.min_force  # minimal force for EGK40 is 55N
+#gripper1.speed = gripper1.gripper_specs.max_speed
 gripper2.max_grasp_force = gripper2.gripper_specs.min_force  # minimal force for EGK40 is 55N
 gripper2.speed = gripper2.gripper_specs.max_speed
 
-'''while True:
-    gripper1.move(0.01)
-    gripper2.move(0.01).wait()
-    time.sleep(1)
-    gripper1.move(0.03)
-    gripper2.move(0.03).wait()
-    time.sleep(1)'''
 
-
-gripper1.move(0.0)
-#gripper2.move(0.03).wait()
+gripper2.move(0.02).wait()

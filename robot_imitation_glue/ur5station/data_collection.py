@@ -80,7 +80,7 @@ if __name__ == "__main__":
         env.get_robot_pose_se3(), env.get_gripper_opening(), action
     )
     # first move robot slowly to the current teleop pose.
-    env.robot.move_linear_to_tcp_pose(initial_pose).wait()
+    env.wilson.move_linear_to_tcp_pose(initial_pose).wait()
 
     collect_data(
         env,

@@ -28,16 +28,23 @@ WRIST_REALSENSE_SERIAL = "817612070315"
 WRIST_CAM_RGB_TOPIC = "wrist_rgb"
 WRIST_CAM_RESOLUTION_TOPIC = "wrist_resolution"
 
-SCENE_ZED_SERIAL = "31733653"
+SCENE_ZED_SERIAL = "38633712"
 SCENE_CAM_RGB_TOPIC = "scene_rgb"
 SCENE_CAM_RESOLUTION_TOPIC = "scene_resolution"
 
-ROBOT_IP = "10.42.0.163"
+WILSON_IP = "10.42.0.163"
+SOPHIE_IP = "10.42.0.162"
 SCHUNK_TCP_OFFSET = 0.184
+CLOTHES_HANGER_GRASP_WIDTH = 0.02
+INIT_GRASPS = False
 
-SCHUNK_GRIPPER_HOST = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0,11,115200,8E1"  # run bks_scan -H <usb> to find the slaveID, run dmesg | grep tty to find the usb port
+SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:5:1.0-port0,11,115200,8E1"
+SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:8:1.0-port0,14,115200,8E1"
 
-HOME_JOINTS = np.array([-180, -90, 90, -90, -90, -90]) * np.pi / 180  # for left UR5e on dual arm setup in mano lab.
+#HOME_JOINTS_WILSON = np.array([-270, -90, 90, -180, -90, 0]) * np.pi / 180
+HOME_JOINTS_WILSON = np.array([0, -60, -90, -210, 0, 0]) * np.pi / 180
+#HOLD_SHIRT_JOINTS_SOPHIE = np.array([-60, -110, 105, -180, 40, -90]) * np.pi / 180
+HOLD_SHIRT_JOINTS_SOPHIE = np.array([-56, -106, 102, -175, 24, -86]) * np.pi / 180
 
 GELLO_AGENT_PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5-if00-port0"
 logger = loguru.logger
@@ -49,11 +56,12 @@ class CameraFactory:
 
     def create_scene_camera():
         return Zed(
-            resolution=Zed.RESOLUTION_VGA, fps=30, depth_mode=Zed.NONE_DEPTH_MODE, serial_number=SCENE_ZED_SERIAL
+            resolution=Zed.RESOLUTION_720, fps=30, depth_mode=Zed.NONE_DEPTH_MODE, serial_number=SCENE_ZED_SERIAL
         )
 
 
 class UR5eStation(BaseEnv):
+    # RealSense wrist camera: rotated 4 teeth
     ACTION_SPEC = None
     PROPRIO_OBS_SPEC = None
 
@@ -63,16 +71,27 @@ class UR5eStation(BaseEnv):
         # logger.info("connecting to gripper.")
 
         # set environment variable for bks gripper comm
-        os.environ["BKS_HOST"] = SCHUNK_GRIPPER_HOST
-        self.gripper = SchunkGripperProcess(SCHUNK_GRIPPER_HOST)
+        #os.environ["BKS_HOST"] = SCHUNK_WILSON_PORT
+        self.gripper_wilson = SchunkGripperProcess(SCHUNK_WILSON_PORT)
+        self.gripper_sophie = SchunkGripperProcess(SCHUNK_SOPHIE_PORT)
         time.sleep(2)
-        self.gripper.max_grasp_force = self.gripper.gripper_specs.min_force  # minimal force for EGK40 is 55N
-        self.gripper.speed = self.gripper.gripper_specs.max_speed
-        logger.info("connecting to robot.")
-        self.robot = URrtde(ROBOT_IP, URrtde.UR3E_CONFIG, gripper=self.gripper)
+        self.gripper_wilson.max_grasp_force = self.gripper_wilson.gripper_specs.min_force  # minimal force for EGK40 is 55N
+        self.gripper_wilson.speed = self.gripper_wilson.gripper_specs.max_speed
+        self.gripper_sophie.max_grasp_force = self.gripper_sophie.gripper_specs.min_force  # minimal force for EGK40 is 55N
+        self.gripper_sophie.speed = self.gripper_sophie.gripper_specs.max_speed
+        logger.info("connecting to Wilson.")
+        self.wilson = URrtde(WILSON_IP, URrtde.UR3E_CONFIG, gripper=self.gripper_wilson)
+        logger.info("connecting to Sophie.")
+        self.sophie = URrtde(SOPHIE_IP, URrtde.UR3E_CONFIG, gripper=self.gripper_sophie)
 
-        robot_awaitable = self.robot.move_to_joint_configuration(
-            HOME_JOINTS
+        if INIT_GRASPS:
+            self.wilson.gripper.open()
+            self.sophie.gripper.open()
+        '''wilson_awaitable = self.wilson.move_to_joint_configuration(
+            HOME_JOINTS_WILSON
+        )'''
+        sophie_awaitable = self.sophie.move_to_joint_configuration(
+            HOLD_SHIRT_JOINTS_SOPHIE
         )  # do not wait, let cameras initialize first
 
         logger.info("Creating wrist camera publisher.")
@@ -112,39 +131,43 @@ class UR5eStation(BaseEnv):
         # wait for first images
         time.sleep(2)
 
-        robot_awaitable.wait()
+        #wilson_awaitable.wait()
+        sophie_awaitable.wait()
+        
+        if INIT_GRASPS:
+            input("Grasp shirt with Sophie?")
+            self.sophie.gripper.move(0, speed=2*self.sophie.gripper.gripper_specs.min_speed, force=self.sophie.gripper.gripper_specs.max_force).wait()
+            input("Grasp clothes hanger with Wilson?")
+            self.wilson.gripper.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.wilson.gripper.gripper_specs.min_speed, force=self.wilson.gripper.gripper_specs.min_force).wait()
 
-        # set up additional sensors if needed.
-
-        # rr.init("ur3e-station",spawn=True)
 
     def get_joint_configuration(self):
-        return self.robot.get_joint_configuration()
+        return self.wilson.get_joint_configuration()
 
     def get_robot_pose_euler(self):
         """
         pose as [x,y,z,rx,ry,rz] in robot base frame using Euler angles
         """
-        hom_pose = self.robot.get_tcp_pose()
+        hom_pose = self.wilson.get_tcp_pose()
         rotation_vector = SE3Container.from_homogeneous_matrix(hom_pose).orientation_as_euler_angles
         position = hom_pose[:3, 3]
         return np.concatenate((position, rotation_vector), axis=0)
 
     def get_robot_pose_se3(self):
-        return self.robot.get_tcp_pose()
+        return self.wilson.get_tcp_pose()
 
     def move_robot_to_tcp_pose(self, pose):
-        self.robot.move_to_tcp_pose(pose).wait()
+        self.wilson.move_to_tcp_pose(pose).wait()
 
     def move_gripper(self, width):
-        self.gripper.move(width).wait()
+        self.gripper_wilson.move(width).wait()
 
     def get_gripper_opening(self):
-        return np.array([self.gripper.get_current_width()])
+        return np.array([self.gripper_wilson.get_current_width()])
 
     def _set_robot_target_pose(self, target_pose):
         # target_pose is a 4x4 homogeneous transformation matrix
-        self.robot.servo_to_tcp_pose()
+        self.wilson.servo_to_tcp_pose()
 
     def get_observations(self):
 
@@ -153,7 +176,7 @@ class UR5eStation(BaseEnv):
         scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()
         robot_state = self.get_robot_pose_euler().astype(np.float32)
         gripper_state = self.get_gripper_opening().astype(np.float32)
-        joints = self.robot.get_joint_configuration().astype(np.float32)
+        joints = self.wilson.get_joint_configuration().astype(np.float32)
 
         state = np.concatenate((robot_state, gripper_state), axis=0)
 
@@ -180,7 +203,7 @@ class UR5eStation(BaseEnv):
 
         return obs_dict
 
-    def act(self, robot_pose_se3, gripper_pose, timestamp):
+    def act(self, robot_pose_se3, gripper_pose, timestamp, disable_gripper=False):
 
         if isinstance(gripper_pose, np.ndarray):
             gripper_pose = gripper_pose[0].item()
@@ -195,48 +218,47 @@ class UR5eStation(BaseEnv):
 
         robot_pose_se3[:3, :3] = normalize_so3_matrix(robot_pose_se3[:3, :3])
 
+        y_coord = robot_pose_se3[1, 3]
         z_coord = robot_pose_se3[2, 3]
 
         if z_coord < 0.0:
-            # too far
-            logger.warning("Z coordinate is below zero . not executing action")
+            logger.warning("Z coordinate is below zero, not executing action.")
+            return
+        if y_coord < -40.0:
+            logger.warning("Y coordinate is beyond camera safety plane, not executing action.")
             return
 
         valid_pose = True
-        if not self.robot.is_tcp_pose_reachable(robot_pose_se3):
-            logger.warning("TCP pose is not reachable, not executing action")
-            valid_pose = False
         MAX_TRANSLATION = 0.15
-        if np.linalg.norm(robot_pose_se3[:3, 3] - self.robot.get_tcp_pose()[:3, 3]) > MAX_TRANSLATION:
-            logger.warning("TCP pose is too far from current pose, clippping translation.")
+        if np.linalg.norm(robot_pose_se3[:3, 3] - self.wilson.get_tcp_pose()[:3, 3]) > MAX_TRANSLATION:
+            logger.warning("TCP pose is too far from current pose, clipping translation.")
             # clip the translation.
-            direction = robot_pose_se3[:3, 3] - self.robot.get_tcp_pose()[:3, 3]
+            direction = robot_pose_se3[:3, 3] - self.wilson.get_tcp_pose()[:3, 3]
             direction = direction / np.linalg.norm(direction)
-            robot_pose_se3[:3, 3] = self.robot.get_tcp_pose()[:3, 3] + 0.5 * MAX_TRANSLATION * direction
+            robot_pose_se3[:3, 3] = self.wilson.get_tcp_pose()[:3, 3] + 0.5 * MAX_TRANSLATION * direction
             valid_pose = True
 
         if robot_pose_se3[2, 3] < 0.0:
             logger.warning("Z coordinate is below zero . not executing action")
             valid_pose = False
 
-        # check if robot is still upright, by checking if the z-component of the z-vector is still negative.
-        if robot_pose_se3[2, 2] > 0.0:
-            logger.warning("robot gripper points upwards, not executing action.")
+        if not self.wilson.is_tcp_pose_reachable(robot_pose_se3):
+            logger.warning("TCP pose is not reachable, not executing action")
             valid_pose = False
-
         if valid_pose:
-            self.robot.servo_to_tcp_pose(robot_pose_se3, duration)
+            self.wilson.servo_to_tcp_pose(robot_pose_se3, duration)
 
         # move gripper to target width
-        gripper_width = np.clip(
-            gripper_pose, self.gripper.gripper_specs.min_width, self.gripper.gripper_specs.max_width
-        )
+        if not disable_gripper:
+            gripper_width = np.clip(
+                gripper_pose, self.gripper_wilson.gripper_specs.min_width, self.gripper_wilson.gripper_specs.max_width
+            )
 
-        logger.debug(f"Setting gripper width to {gripper_width}")
-        time_before_gripper = time.time()
-        self.gripper.servo(gripper_width)
-        time_after_gripper = time.time()
-        logger.debug(f"Gripper servo time: {time_after_gripper - time_before_gripper}")
+            logger.debug(f"Setting gripper width to {gripper_width}")
+            time_before_gripper = time.time()
+            self.gripper_wilson.servo(gripper_width)
+            time_after_gripper = time.time()
+            logger.debug(f"Gripper servo time: {time_after_gripper - time_before_gripper}")
 
         # do not wait, handling timings is the responsibility of the caller
         return
@@ -244,7 +266,7 @@ class UR5eStation(BaseEnv):
     def close(self):
         self._wrist_camera_publisher.stop()
         self._scene_camera_publisher.stop()
-        self.gripper.shutdown()
+        self.gripper_wilson.shutdown()
 
 
 def convert_abs_gello_actions_to_se3(current_pose, current_gripper_state, action: np.ndarray):
@@ -289,7 +311,7 @@ if __name__ == "__main__":
     input("Press Enter to start teleoperation")
     action = agent.get_action(env.get_observations())
     robot_se3, gripper = convert_abs_gello_actions_to_se3(action)
-    env.robot.servo_to_tcp_pose(robot_se3, 1.0)
+    env.wilson.servo_to_tcp_pose(robot_se3, 1.0)
 
     while True:
         loop_time = time.time()

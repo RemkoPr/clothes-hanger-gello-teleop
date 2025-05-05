@@ -186,6 +186,7 @@ def collect_data(  # noqa: C901
             robot_pose_se3=new_robot_target_se3_pose,
             gripper_pose=new_gripper_target_width,
             timestamp=time.time() + control_period,
+            disable_gripper=True
         )
 
         if state.is_recording:
