@@ -35,7 +35,7 @@ class BaseEnv(abc.ABC):
         """robot pose in base frame as a 4x4 numpy array"""
 
     @abc.abstractmethod
-    def get_gripper_opening(self):
+    def get_gripper_openings(self):
         """absolute gripper opening in meters as a (1,) numpy array"""
 
     @abc.abstractmethod

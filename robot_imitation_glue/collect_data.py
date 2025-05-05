@@ -94,7 +94,8 @@ def collect_data(  # noqa: C901
     control_period = 1 / frequency
 
     target_pose = env.get_robot_pose_se3()
-    target_gripper_state = env.get_gripper_opening()
+    target_joint_pose = env.get_joint_configuration()
+    target_gripper_state = np.array([env.get_gripper_openings()[0]])
 
     while not state.is_stopped:
         cycle_end_time = time.time() + control_period
@@ -170,7 +171,7 @@ def collect_data(  # noqa: C901
         action = teleop_agent.get_action(observation)
         logger.info(f"Action: {action}")
 
-        new_robot_target_se3_pose, new_gripper_target_width = teleop_to_pose_converter(
+        new_robot_target_pose, new_gripper_target_width = teleop_to_pose_converter(
             target_pose, target_gripper_state, action
         )
 
@@ -179,11 +180,11 @@ def collect_data(  # noqa: C901
         # observation["target_abs_gripper_pose"] = new_gripper_target_width
 
         policy_formatted_action = abs_pose_to_policy_action(
-            target_pose, target_gripper_state, new_robot_target_se3_pose, new_gripper_target_width
+            target_joint_pose, target_gripper_state, new_robot_target_pose, new_gripper_target_width
         )
 
         env.act(
-            robot_pose_se3=new_robot_target_se3_pose,
+            robot_pose=new_robot_target_pose,
             gripper_pose=new_gripper_target_width,
             timestamp=time.time() + control_period,
             disable_gripper=True
@@ -199,7 +200,7 @@ def collect_data(  # noqa: C901
             print("cycle time exceeded control period")
 
         # update the target pose and target gripper state for the next iteration
-        target_pose = new_robot_target_se3_pose
+        target_pose = new_robot_target_pose
         target_gripper_state = new_gripper_target_width
 
         # TODO: we now use 'integration' to get the next target pose instead of using the current pose.

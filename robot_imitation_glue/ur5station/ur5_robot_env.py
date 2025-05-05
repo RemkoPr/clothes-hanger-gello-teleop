@@ -50,6 +50,9 @@ GELLO_AGENT_PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5
 logger = loguru.logger
 
 
+MAX_TRANSLATION = 0.15
+MAX_JOINT_DELTA = 10 * np.pi / 180
+
 class CameraFactory:
     def create_wrist_camera():
         return Realsense(resolution=Realsense.RESOLUTION_480, fps=30, serial_number=WRIST_REALSENSE_SERIAL)
@@ -83,6 +86,10 @@ class UR5eStation(BaseEnv):
         self.wilson = URrtde(WILSON_IP, URrtde.UR3E_CONFIG, gripper=self.gripper_wilson)
         logger.info("connecting to Sophie.")
         self.sophie = URrtde(SOPHIE_IP, URrtde.UR3E_CONFIG, gripper=self.gripper_sophie)
+
+        self.teleop_robot = self.sophie
+        self.gripper_teleop = self.gripper_sophie
+        self.gripper_hold = self.gripper_wilson
 
         if INIT_GRASPS:
             self.wilson.gripper.open()
@@ -135,35 +142,35 @@ class UR5eStation(BaseEnv):
         sophie_awaitable.wait()
         
         if INIT_GRASPS:
-            input("Grasp shirt with Sophie?")
-            self.sophie.gripper.move(0, speed=2*self.sophie.gripper.gripper_specs.min_speed, force=self.sophie.gripper.gripper_specs.max_force).wait()
-            input("Grasp clothes hanger with Wilson?")
-            self.wilson.gripper.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.wilson.gripper.gripper_specs.min_speed, force=self.wilson.gripper.gripper_specs.min_force).wait()
+            input("Grasp shirt?")
+            self.gripper_hold.gripper.move(0, speed=2*self.gripper_hold.gripper.gripper_specs.min_speed, force=self.gripper_hold.gripper.gripper_specs.max_force).wait()
+            input("Grasp clothes hanger?")
+            self.gripper_teleop.gripper.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.gripper_teleop.gripper.gripper_specs.min_speed, force=self.gripper_teleop.gripper.gripper_specs.min_force).wait()
 
 
     def get_joint_configuration(self):
-        return self.wilson.get_joint_configuration()
+        return self.teleop_robot.get_joint_configuration()
 
     def get_robot_pose_euler(self):
         """
         pose as [x,y,z,rx,ry,rz] in robot base frame using Euler angles
         """
-        hom_pose = self.wilson.get_tcp_pose()
+        hom_pose = self.teleop_robot.get_tcp_pose()
         rotation_vector = SE3Container.from_homogeneous_matrix(hom_pose).orientation_as_euler_angles
         position = hom_pose[:3, 3]
         return np.concatenate((position, rotation_vector), axis=0)
 
     def get_robot_pose_se3(self):
-        return self.wilson.get_tcp_pose()
+        return self.teleop_robot.get_tcp_pose()
 
     def move_robot_to_tcp_pose(self, pose):
-        self.wilson.move_to_tcp_pose(pose).wait()
+        self.teleop_robot.move_to_tcp_pose(pose).wait()
 
     def move_gripper(self, width):
-        self.gripper_wilson.move(width).wait()
+        self.gripper_teleop.move(width).wait()
 
-    def get_gripper_opening(self):
-        return np.array([self.gripper_wilson.get_current_width()])
+    def get_gripper_openings(self):
+        return np.array([self.gripper_teleop.get_current_width(), self.gripper_hold.get_current_width()])
 
     def _set_robot_target_pose(self, target_pose):
         # target_pose is a 4x4 homogeneous transformation matrix
@@ -175,10 +182,10 @@ class UR5eStation(BaseEnv):
         wrist_image = self._wrist_camera_subscriber.get_rgb_image_as_int()
         scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()
         robot_state = self.get_robot_pose_euler().astype(np.float32)
-        gripper_state = self.get_gripper_opening().astype(np.float32)
-        joints = self.wilson.get_joint_configuration().astype(np.float32)
+        gripper_states = self.get_gripper_openings().astype(np.float32)
+        joints = self.teleop_robot.get_joint_configuration().astype(np.float32)
 
-        state = np.concatenate((robot_state, gripper_state), axis=0)
+        state = np.concatenate((robot_state, gripper_states), axis=0)
 
         # resize images
 
@@ -192,7 +199,7 @@ class UR5eStation(BaseEnv):
             "scene_image": scene_image_resized,
             "state": state,
             "robot_pose": robot_state,
-            "gripper_state": gripper_state,
+            "gripper_states": gripper_states,
             "joints": joints,
         }
         logger.info(f"get_observations time: {time.time() - start_time}")
@@ -203,7 +210,7 @@ class UR5eStation(BaseEnv):
 
         return obs_dict
 
-    def act(self, robot_pose_se3, gripper_pose, timestamp, disable_gripper=False):
+    def act(self, robot_pose, gripper_pose, timestamp, disable_gripper=False, control_space="JOINT"):
 
         if isinstance(gripper_pose, np.ndarray):
             gripper_pose = gripper_pose[0].item()
@@ -214,39 +221,72 @@ class UR5eStation(BaseEnv):
         if duration < 0:
             logger.warning("Action duration is negative, setting it to 0")
             duration = 0
-        logger.debug(f"Moving robot to pose \n {robot_pose_se3} with duration {duration}")
+        logger.debug(f"Moving robot to pose \n {robot_pose} with duration {duration}")
 
-        robot_pose_se3[:3, :3] = normalize_so3_matrix(robot_pose_se3[:3, :3])
+        if control_space == "TOOL":
+            robot_pose_se3 = robot_pose.copy()
+            robot_pose_se3[:3, :3] = normalize_so3_matrix(robot_pose_se3[:3, :3])
 
-        y_coord = robot_pose_se3[1, 3]
-        z_coord = robot_pose_se3[2, 3]
+            y_coord = robot_pose_se3[1, 3]
+            z_coord = robot_pose_se3[2, 3]
 
-        if z_coord < 0.0:
-            logger.warning("Z coordinate is below zero, not executing action.")
-            return
-        if y_coord < -40.0:
-            logger.warning("Y coordinate is beyond camera safety plane, not executing action.")
-            return
+            if z_coord < 0.0:
+                logger.warning("Z coordinate is below zero, not executing action.")
+                return
+            if y_coord < -40.0:
+                logger.warning("Y coordinate is beyond camera safety plane, not executing action.")
+                return
 
-        valid_pose = True
-        MAX_TRANSLATION = 0.15
-        if np.linalg.norm(robot_pose_se3[:3, 3] - self.wilson.get_tcp_pose()[:3, 3]) > MAX_TRANSLATION:
-            logger.warning("TCP pose is too far from current pose, clipping translation.")
-            # clip the translation.
-            direction = robot_pose_se3[:3, 3] - self.wilson.get_tcp_pose()[:3, 3]
-            direction = direction / np.linalg.norm(direction)
-            robot_pose_se3[:3, 3] = self.wilson.get_tcp_pose()[:3, 3] + 0.5 * MAX_TRANSLATION * direction
             valid_pose = True
+            if np.linalg.norm(robot_pose_se3[:3, 3] - self.teleop_robot.get_tcp_pose()[:3, 3]) > MAX_TRANSLATION:
+                logger.warning("TCP pose is too far from current pose, clipping translation.")
+                # clip the translation.
+                direction = robot_pose_se3[:3, 3] - self.teleop_robot.get_tcp_pose()[:3, 3]
+                direction = direction / np.linalg.norm(direction)
+                robot_pose_se3[:3, 3] = self.teleop_robot.get_tcp_pose()[:3, 3] + 0.5 * MAX_TRANSLATION * direction
+                valid_pose = True
 
-        if robot_pose_se3[2, 3] < 0.0:
-            logger.warning("Z coordinate is below zero . not executing action")
-            valid_pose = False
+            if robot_pose_se3[2, 3] < 0.0:
+                logger.warning("Z coordinate is below zero . not executing action")
+                valid_pose = False
 
-        if not self.wilson.is_tcp_pose_reachable(robot_pose_se3):
-            logger.warning("TCP pose is not reachable, not executing action")
-            valid_pose = False
-        if valid_pose:
-            self.wilson.servo_to_tcp_pose(robot_pose_se3, duration)
+            if not self.teleop_robot.is_tcp_pose_reachable(robot_pose_se3):
+                logger.warning("TCP pose is not reachable, not executing action")
+                valid_pose = False
+            if valid_pose:
+                self.teleop_robot.servo_to_tcp_pose(robot_pose_se3, duration)
+        elif control_space == "JOINT":
+            robot_pose_se3 = ur5e.forward_kinematics_with_tcp(*robot_pose[:6], np.eye(4))
+
+            y_coord = robot_pose_se3[1, 3]
+            z_coord = robot_pose_se3[2, 3]
+
+            if z_coord < 0.0:
+                logger.warning("Z coordinate is below zero, not executing action.")
+                return
+            if y_coord < -40.0:
+                logger.warning("Y coordinate is beyond camera safety plane, not executing action.")
+                return
+
+            valid_pose = True
+            joint_diff = abs(robot_pose[:6] - self.teleop_robot.get_joint_configuration())
+            if np.max(joint_diff) > MAX_JOINT_DELTA:
+                logger.warning(f"Joints {joint_diff > MAX_JOINT_DELTA} move too far from current pose, clipping rotation.")
+                robot_pose[joint_diff > MAX_JOINT_DELTA] = MAX_JOINT_DELTA
+                valid_pose = True
+
+            if robot_pose_se3[2, 3] < 0.0:
+                logger.warning("Z coordinate is below zero . not executing action")
+                valid_pose = False
+
+            if not self.teleop_robot.is_tcp_pose_reachable(robot_pose_se3):
+                logger.warning("TCP pose is not reachable, not executing action")
+                valid_pose = False
+            if valid_pose:
+                self.teleop_robot.servo_to_joint_configuration(robot_pose, duration)
+        else:
+            raise ValueError(f"Unknown control space: {control_space}")
+
 
         # move gripper to target width
         if not disable_gripper:
@@ -256,7 +296,7 @@ class UR5eStation(BaseEnv):
 
             logger.debug(f"Setting gripper width to {gripper_width}")
             time_before_gripper = time.time()
-            self.gripper_wilson.servo(gripper_width)
+            self.gripper_sophie.servo(gripper_width)
             time_after_gripper = time.time()
             logger.debug(f"Gripper servo time: {time_after_gripper - time_before_gripper}")
 
@@ -278,6 +318,14 @@ def convert_abs_gello_actions_to_se3(current_pose, current_gripper_state, action
     gripper = (1 - gripper) * 0.08  # convert to stroke width
     pose = ur5e.forward_kinematics_with_tcp(*joints, tcp_pose)
     return pose, gripper
+
+
+def convert_gello_actions_to_joint_space_robot_pose(current_pose, current_gripper_state, action: np.ndarray):
+    del current_pose, current_gripper_state
+    joints = action[:6]
+    gripper = action[6]
+    gripper = (1 - gripper) * 0.08  # convert to stroke width
+    return joints, gripper
 
 
 def abs_joint_policy_action_to_se3(current_pose, current_gripper_state, action: np.ndarray):

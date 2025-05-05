@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from loguru import logger
 import numpy as np
 
 from robot_imitation_glue.agents.gello.dynamixel_robot import DynamixelRobot
@@ -35,13 +36,24 @@ class GelloAgent(BaseAgent):
             start_joints=start_joints,
             real=True,
         )
+        init_joints = self.robot.get_joint_state()
+        self.joint_offsets = np.array([0.0 for _ in range(init_joints.size)])
+        for idx, joint in enumerate(init_joints):
+            while joint > 2*np.pi:
+                joint -= 2*np.pi
+                self.joint_offsets[idx] -= 2*np.pi
+            while joint < -2*np.pi:
+                joint += 2*np.pi
+                self.joint_offsets[idx] += 2*np.pi
+        logger.info(f"Gello initialised with joint offsets: {self.joint_offsets}")
+
 
     def get_action(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
         """
         Get the action from the agent
         """
 
-        return self.robot.get_joint_state()
+        return self.robot.get_joint_state() + self.joint_offsets
 
 
 if __name__ == "__main__":

@@ -29,5 +29,5 @@ gripper2.speed = gripper2.gripper_specs.max_speed
     time.sleep(1)'''
 
 
-gripper1.move(0.0)
+gripper2.move(0.02).wait()
 #gripper2.move(0.03).wait()

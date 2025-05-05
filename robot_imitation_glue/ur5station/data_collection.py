@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+from loguru import logger
 import numpy as np
 
 from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
@@ -9,7 +10,7 @@ from robot_imitation_glue.dataset_recorder import LeRobotDatasetRecorder
 from robot_imitation_glue.ur5station.ur5_robot_env import (
     GELLO_AGENT_PORT,
     UR5eStation,
-    convert_abs_gello_actions_to_se3,
+    convert_gello_actions_to_joint_space_robot_pose,
 )
 
 
@@ -24,6 +25,16 @@ def abs_se3_to_policy_action_converter(robot_pose, gripper_pose, abs_se3_action,
     policy_action[3:6] = abs_rotation_x
     policy_action[6:9] = abs_rotation_y
     policy_action[9] = gripper_action
+    policy_action = policy_action.astype(np.float32)
+    return policy_action
+
+
+def abs_joints_to_policy_action_converter(robot_pose, gripper_pose, abs_joint_action, gripper_action):
+    """absolute poses, encoded as position, x-vector of rotation, y-vector of rotation, gripper action"""
+
+    policy_action = np.zeros(7)
+    policy_action[:6] = abs_joint_action
+    policy_action[6] = gripper_action
     policy_action = policy_action.astype(np.float32)
     return policy_action
 
@@ -46,6 +57,12 @@ def policy_action_to_abs_se3_converter(robot_pose, gripper_pose, policy_action):
     target_pose[:3, 1] = y
     target_pose[:3, 2] = z
     return target_pose, gripper_action
+
+def policy_action_to_abs_joint_converter(robot_pose, gripper_pose, policy_action):
+    policy_action = policy_action.astype(np.float64)
+    target_joint_pose = policy_action[:6]
+    gripper_action = policy_action[6]
+    return target_joint_pose, gripper_action
 
 
 if __name__ == "__main__":
@@ -76,17 +93,19 @@ if __name__ == "__main__":
 
     input("Press Enter to start collecting data")
     action = agent.get_action(env.get_observations())
-    initial_pose, gripper = convert_abs_gello_actions_to_se3(
-        env.get_robot_pose_se3(), env.get_gripper_opening(), action
+    logger.debug(f"Action: {action}")
+    initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
+        env.get_joint_configuration(), np.array([env.get_gripper_openings()[0]]), action
     )
     # first move robot slowly to the current teleop pose.
-    env.wilson.move_linear_to_tcp_pose(initial_pose).wait()
+    logger.info(f"Moving to initial pose: {initial_pose}")
+    env.teleop_robot.move_to_joint_configuration(initial_pose).wait()
 
     collect_data(
         env,
         agent,
         dataset_recorder,
         frequency=10,
-        teleop_to_pose_converter=convert_abs_gello_actions_to_se3,
-        abs_pose_to_policy_action=abs_se3_to_policy_action_converter,
+        teleop_to_pose_converter=convert_gello_actions_to_joint_space_robot_pose,
+        abs_pose_to_policy_action=abs_joints_to_policy_action_converter,
     )
