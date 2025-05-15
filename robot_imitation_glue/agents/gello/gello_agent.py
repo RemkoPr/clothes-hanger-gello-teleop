@@ -36,7 +36,7 @@ class GelloAgent(BaseAgent):
             start_joints=start_joints,
             real=True,
         )
-        init_joints = self.robot.get_joint_state()
+        '''init_joints = self.robot.get_joint_state()
         self.joint_offsets = np.array([0.0 for _ in range(init_joints.size)])
         for idx, joint in enumerate(init_joints):
             while joint > 2*np.pi:
@@ -45,7 +45,7 @@ class GelloAgent(BaseAgent):
             while joint < -2*np.pi:
                 joint += 2*np.pi
                 self.joint_offsets[idx] += 2*np.pi
-        logger.info(f"Gello initialised with joint offsets: {self.joint_offsets}")
+        logger.info(f"Gello initialised with joints {init_joints}, leading to joint offsets: {self.joint_offsets}")'''
 
 
     def get_action(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
@@ -53,7 +53,7 @@ class GelloAgent(BaseAgent):
         Get the action from the agent
         """
 
-        return self.robot.get_joint_state() + self.joint_offsets
+        return self.robot.get_joint_state()
 
 
 if __name__ == "__main__":

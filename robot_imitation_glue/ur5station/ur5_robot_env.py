@@ -16,6 +16,7 @@ from airo_camera_toolkit.cameras.zed.zed import Zed
 from airo_robots.manipulators.hardware.ur_rtde import URrtde
 from airo_spatial_algebra.se3 import SE3Container, normalize_so3_matrix
 from ur_analytic_ik import ur5e
+from clothes_hanger import ClothesHanger, ClothesHangerMock
 
 from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
 from robot_imitation_glue.base import BaseEnv
@@ -41,10 +42,8 @@ INIT_GRASPS = False
 SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:5:1.0-port0,11,115200,8E1"
 SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:8:1.0-port0,14,115200,8E1"
 
-#HOME_JOINTS_WILSON = np.array([-270, -90, 90, -180, -90, 0]) * np.pi / 180
-HOME_JOINTS_WILSON = np.array([0, -60, -90, -210, 0, 0]) * np.pi / 180
-#HOLD_SHIRT_JOINTS_SOPHIE = np.array([-60, -110, 105, -180, 40, -90]) * np.pi / 180
-HOLD_SHIRT_JOINTS_SOPHIE = np.array([-56, -106, 102, -175, 24, -86]) * np.pi / 180
+HOLD_SHIRT_JOINTS_WILSON = np.array([160, -130, 84, 44, 94, 87]) * np.pi / 180
+HOME_JOINTS_SOPHIE = np.array([0, -150, 125, -150, -85, 0]) * np.pi / 180
 
 GELLO_AGENT_PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5-if00-port0"
 logger = loguru.logger
@@ -91,15 +90,17 @@ class UR5eStation(BaseEnv):
         self.gripper_teleop = self.gripper_sophie
         self.gripper_hold = self.gripper_wilson
 
+        self.clothes_hanger = ClothesHangerMock()
+
         if INIT_GRASPS:
             self.wilson.gripper.open()
             self.sophie.gripper.open()
-        '''wilson_awaitable = self.wilson.move_to_joint_configuration(
-            HOME_JOINTS_WILSON
-        )'''
+        wilson_awaitable = self.wilson.move_to_joint_configuration(
+            HOLD_SHIRT_JOINTS_WILSON
+        )
         sophie_awaitable = self.sophie.move_to_joint_configuration(
-            HOLD_SHIRT_JOINTS_SOPHIE
-        )  # do not wait, let cameras initialize first
+            HOME_JOINTS_SOPHIE
+        )  # do not wait, let cameras initialize first'''
 
         logger.info("Creating wrist camera publisher.")
         self._wrist_camera_publisher = RGBCameraPublisher(
@@ -138,14 +139,14 @@ class UR5eStation(BaseEnv):
         # wait for first images
         time.sleep(2)
 
-        #wilson_awaitable.wait()
+        wilson_awaitable.wait()
         sophie_awaitable.wait()
         
         if INIT_GRASPS:
             input("Grasp shirt?")
-            self.gripper_hold.gripper.move(0, speed=2*self.gripper_hold.gripper.gripper_specs.min_speed, force=self.gripper_hold.gripper.gripper_specs.max_force).wait()
+            self.gripper_hold.move(0, speed=2*self.gripper_hold.gripper_specs.min_speed, force=self.gripper_hold.gripper_specs.max_force).wait()
             input("Grasp clothes hanger?")
-            self.gripper_teleop.gripper.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.gripper_teleop.gripper.gripper_specs.min_speed, force=self.gripper_teleop.gripper.gripper_specs.min_force).wait()
+            self.gripper_teleop.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.gripper_teleop.gripper_specs.min_speed, force=self.gripper_teleop.gripper_specs.min_force).wait()
 
 
     def get_joint_configuration(self):
@@ -166,6 +167,9 @@ class UR5eStation(BaseEnv):
     def move_robot_to_tcp_pose(self, pose):
         self.teleop_robot.move_to_tcp_pose(pose).wait()
 
+    def move_robot_to_joint_pose(self, pose):
+        self.teleop_robot.move_to_joint_configuration(pose).wait()
+
     def move_gripper(self, width):
         self.gripper_teleop.move(width).wait()
 
@@ -184,8 +188,10 @@ class UR5eStation(BaseEnv):
         robot_state = self.get_robot_pose_euler().astype(np.float32)
         gripper_states = self.get_gripper_openings().astype(np.float32)
         joints = self.teleop_robot.get_joint_configuration().astype(np.float32)
+        clothes_hanger_values = self.clothes_hanger.read().astype(np.float32)
 
-        state = np.concatenate((robot_state, gripper_states), axis=0)
+        #state = np.concatenate((robot_state, gripper_states), axis=0)
+        state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)
 
         # resize images
 
@@ -201,6 +207,7 @@ class UR5eStation(BaseEnv):
             "robot_pose": robot_state,
             "gripper_states": gripper_states,
             "joints": joints,
+            "clothes_hanger": clothes_hanger_values,
         }
         logger.info(f"get_observations time: {time.time() - start_time}")
 
@@ -290,13 +297,13 @@ class UR5eStation(BaseEnv):
 
         # move gripper to target width
         if not disable_gripper:
-            gripper_width = np.clip(
-                gripper_pose, self.gripper_wilson.gripper_specs.min_width, self.gripper_wilson.gripper_specs.max_width
+            gripper_width = self.gripper_hold.gripper_specs.max_width - np.clip(
+                gripper_pose, self.gripper_hold.gripper_specs.min_width, self.gripper_hold.gripper_specs.max_width
             )
 
             logger.debug(f"Setting gripper width to {gripper_width}")
             time_before_gripper = time.time()
-            self.gripper_sophie.servo(gripper_width)
+            self.gripper_hold.servo(gripper_width)
             time_after_gripper = time.time()
             logger.debug(f"Gripper servo time: {time_after_gripper - time_before_gripper}")
 
@@ -336,6 +343,12 @@ def abs_joint_policy_action_to_se3(current_pose, current_gripper_state, action: 
     tcp_pose[2, 3] = SCHUNK_TCP_OFFSET
     pose = ur5e.forward_kinematics_with_tcp(*joints, tcp_pose)
     return pose, gripper
+
+def abs_joint_policy_action_to_joint_pose(current_pose, current_gripper_state, action: np.ndarray):
+    del current_pose, current_gripper_state
+    joints = action[:6]
+    gripper = action[6]
+    return joints, gripper
 
 
 dynamixel_config = DynamixelConfig(

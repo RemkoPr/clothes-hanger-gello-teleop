@@ -16,18 +16,23 @@ def replay_episode(
     episode_idx: int = 0,
     fps=10,
 ):
+    logger.debug("replay_episode")
     episode_indices = dataset.episode_data_index
+    logger.debug(f"episode_indices = {episode_indices}")
     episode_start_idx = episode_indices["from"][episode_idx].item()
+    logger.debug(f"episode_start_idx = {episode_start_idx}")
     episode_to_idx = episode_indices["to"][episode_idx].item()
-
-    dataset_initial_image = dataset[episode_start_idx][dataset_image_key]
+    logger.debug(f"episode_to_idx = {episode_to_idx}")
+    logger.debug(f'dataset keys: {list(dataset[episode_start_idx].keys())}')
+    dataset_initial_image = dataset[episode_start_idx][image_key]
+    logger.debug(f"dataset_initial_image.shape = {dataset_initial_image.shape}")
     dataset_initial_action = dataset[episode_start_idx]["action"].cpu().numpy()
     initial_robot_pose, initial_gripper = action_to_env_converter(
-        env.get_robot_pose_se3(), env.get_gripper_opening(), dataset_initial_action
+        env.get_robot_pose_se3(), env.get_gripper_openings()[0], dataset_initial_action
     )
 
     input(f"Press Enter to move robot to initial pose \n {initial_robot_pose}")
-    env.move_robot_to_tcp_pose(initial_robot_pose)
+    env.move_robot_to_joint_pose(initial_robot_pose)
     env.move_gripper(initial_gripper)
 
     # convert torch image to numpy image
@@ -55,9 +60,9 @@ def replay_episode(
         obs = env.get_observations()
         # print(f"current obs = {obs}")
         # print(f"dataset obs = {dataset[i]}")
-        robot_pose, gripper = action_to_env_converter(env.get_robot_pose_se3(), env.get_gripper_opening(), action)
+        robot_pose, gripper = action_to_env_converter(env.get_robot_pose_se3(), env.get_gripper_openings()[0], action)
         logger.debug(f"target robot pose = {robot_pose}")
-        logger.debug(f"current robot pose = {env.get_robot_pose_se3()}")
+        logger.debug(f"current robot pose = {env.get_joint_configuration()}")
         logger.debug(f"current state observation = {obs['state']}")
         env.act(robot_pose, gripper, time.time() + duration)
         time.sleep(duration)

@@ -81,17 +81,17 @@ if __name__ == "__main__":
         joint_signs=[1, 1, -1, 1, 1, 1],
         gripper_config=(7, 194, 152),
     )
-    agent = GelloAgent(config, GELLO_AGENT_PORT)
 
     dataset_recorder = LeRobotDatasetRecorder(
         example_obs_dict=env.get_observations(),
-        example_action=np.zeros(10),
+        example_action=np.zeros(7),
         root_dataset_dir=Path(f"datasets/{args.dataset_name}/"),
         dataset_name="none",
         fps=10,
     )
 
-    input("Press Enter to start collecting data")
+    input("Hold Gello arm in similar pose as teleop robot and press Enter to start collecting data")
+    agent = GelloAgent(config, GELLO_AGENT_PORT, start_joints=env.teleop_robot.get_joint_configuration())
     action = agent.get_action(env.get_observations())
     logger.debug(f"Action: {action}")
     initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
