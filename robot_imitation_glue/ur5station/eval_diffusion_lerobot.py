@@ -16,10 +16,10 @@ from robot_imitation_glue.ur5station.ur5_robot_env import (
 
 if __name__ == "__main__":
     checkpoint_path = "/home/tlips/Code/robot-imitation-glue/outputs/train/2025-04-15/10-52-19_pick-cube_diffusion/checkpoints/070000/pretrained_model"
-    train_dataset_path = "/home/tlips/Code/robot-imitation-glue/datasets/pick-cube-v2-remapped"
-    eval_scenarios_dataset_path = "/home/tlips/Code/robot-imitation-glue/datasets/pick-cube-eval-scenarios"
+    train_dataset_path = "/home/tlips/Code/robot-imitation-glue/datasets/pick-cube-v2-remapped"  # preprocessed train dataset
+    eval_scenarios_dataset_path = None  # "/home/tlips/Code/robot-imitation-glue/datasets/pick-cube-eval-scenarios"  # Potentially set to train dataset to mimic initial state of certain training episode to check if policy works on "seen sample"
 
-    eval_dataset_name = "pick-cube-eval-DP"
+    eval_dataset_name = "pick-cube-eval-DP"  # Name for 'new' dataset of all rollouts for evaluation after 
 
     def preprocessor(obs_dict):
         scene_img = obs_dict["scene_image"]

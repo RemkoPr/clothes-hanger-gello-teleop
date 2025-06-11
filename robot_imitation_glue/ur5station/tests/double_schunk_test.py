@@ -8,7 +8,7 @@ from robot_imitation_glue.grippers.schunk_process import SchunkGripperProcess
 SCHUNK_GRIPPER_HOST1 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:5:1.0-port0,11,115200,8E1"
 #SCHUNK_GRIPPER_HOST2 = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0,14,115200,8E1"
 #SCHUNK_GRIPPER_HOST2 = "/dev/ttyUSB2,14,115200,8E1"
-SCHUNK_GRIPPER_HOST2 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:8:1.0-port0,14,115200,8E1"
+SCHUNK_GRIPPER_HOST2 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0,14,115200,8E1"
 
 
 #os.environ["BKS_HOST"] = SCHUNK_GRIPPER_HOST1
@@ -29,5 +29,5 @@ gripper2.speed = gripper2.gripper_specs.max_speed
     time.sleep(1)'''
 
 
+gripper1.move(0.02).wait()
 gripper2.move(0.02).wait()
-#gripper2.move(0.03).wait()

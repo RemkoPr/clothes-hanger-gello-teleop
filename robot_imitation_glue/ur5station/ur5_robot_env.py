@@ -37,10 +37,10 @@ WILSON_IP = "10.42.0.163"
 SOPHIE_IP = "10.42.0.162"
 SCHUNK_TCP_OFFSET = 0.184
 CLOTHES_HANGER_GRASP_WIDTH = 0.02
-INIT_GRASPS = False
+INIT_GRASPS = True
 
 SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:5:1.0-port0,11,115200,8E1"
-SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:8:1.0-port0,14,115200,8E1"
+SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0,14,115200,8E1"
 
 HOLD_SHIRT_JOINTS_WILSON = np.array([160, -130, 84, 44, 94, 87]) * np.pi / 180
 HOME_JOINTS_SOPHIE = np.array([0, -150, 125, -150, -85, 0]) * np.pi / 180
@@ -54,7 +54,7 @@ MAX_JOINT_DELTA = 10 * np.pi / 180
 
 class CameraFactory:
     def create_wrist_camera():
-        return Realsense(resolution=Realsense.RESOLUTION_480, fps=30, serial_number=WRIST_REALSENSE_SERIAL)
+        return Realsense(resolution=Realsense.RESOLUTION_720, fps=30, serial_number=WRIST_REALSENSE_SERIAL)
 
     def create_scene_camera():
         return Zed(
@@ -90,7 +90,8 @@ class UR5eStation(BaseEnv):
         self.gripper_teleop = self.gripper_sophie
         self.gripper_hold = self.gripper_wilson
 
-        self.clothes_hanger = ClothesHangerMock()
+        self.clothes_hanger = ClothesHanger()
+        self.clothes_hanger.read()  # Test if clothes hanger can be read
 
         if INIT_GRASPS:
             self.wilson.gripper.open()
@@ -144,7 +145,7 @@ class UR5eStation(BaseEnv):
         
         if INIT_GRASPS:
             input("Grasp shirt?")
-            self.gripper_hold.move(0, speed=2*self.gripper_hold.gripper_specs.min_speed, force=self.gripper_hold.gripper_specs.max_force).wait()
+            self.gripper_hold.move(0.0, speed=2*self.gripper_hold.gripper_specs.min_speed, force=self.gripper_hold.gripper_specs.max_force).wait()
             input("Grasp clothes hanger?")
             self.gripper_teleop.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.gripper_teleop.gripper_specs.min_speed, force=self.gripper_teleop.gripper_specs.min_force).wait()
 
@@ -185,13 +186,13 @@ class UR5eStation(BaseEnv):
         start_time = time.time()
         wrist_image = self._wrist_camera_subscriber.get_rgb_image_as_int()
         scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()
-        robot_state = self.get_robot_pose_euler().astype(np.float32)
+        robot_state = self.get_joint_configuration().astype(np.float32)  # set to joint configuration
         gripper_states = self.get_gripper_openings().astype(np.float32)
         joints = self.teleop_robot.get_joint_configuration().astype(np.float32)
         clothes_hanger_values = self.clothes_hanger.read().astype(np.float32)
 
         #state = np.concatenate((robot_state, gripper_states), axis=0)
-        state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)
+        state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)  # not directly used, state is instead formed in ur5station/prepare_datasets
 
         # resize images
 
@@ -286,9 +287,9 @@ class UR5eStation(BaseEnv):
                 logger.warning("Z coordinate is below zero . not executing action")
                 valid_pose = False
 
-            if not self.teleop_robot.is_tcp_pose_reachable(robot_pose_se3):
+            '''if not self.teleop_robot.is_tcp_pose_reachable(robot_pose_se3):
                 logger.warning("TCP pose is not reachable, not executing action")
-                valid_pose = False
+                valid_pose = False'''
             if valid_pose:
                 self.teleop_robot.servo_to_joint_configuration(robot_pose, duration)
         else:
