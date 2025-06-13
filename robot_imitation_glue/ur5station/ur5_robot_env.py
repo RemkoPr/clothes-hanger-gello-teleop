@@ -37,12 +37,13 @@ WILSON_IP = "10.42.0.163"
 SOPHIE_IP = "10.42.0.162"
 SCHUNK_TCP_OFFSET = 0.184
 CLOTHES_HANGER_GRASP_WIDTH = 0.02
-INIT_GRASPS = True
+INIT_GRASPS = False
 
 SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:5:1.0-port0,11,115200,8E1"
 SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0,14,115200,8E1"
 
-HOLD_SHIRT_JOINTS_WILSON = np.array([160, -130, 84, 44, 94, 87]) * np.pi / 180
+HOLD_SHIRT_JOINTS_WILSON_HORIZONTAL = np.array([160, -130, 84, 44, 94, 87]) * np.pi / 180
+HOLD_SHIRT_JOINTS_WILSON_VERTICAL = np.array([157, -92, 29, -24, -91, 83]) * np.pi / 180
 HOME_JOINTS_SOPHIE = np.array([0, -150, 125, -150, -85, 0]) * np.pi / 180
 
 GELLO_AGENT_PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5-if00-port0"
@@ -97,7 +98,7 @@ class UR5eStation(BaseEnv):
             self.wilson.gripper.open()
             self.sophie.gripper.open()
         wilson_awaitable = self.wilson.move_to_joint_configuration(
-            HOLD_SHIRT_JOINTS_WILSON
+            HOLD_SHIRT_JOINTS_WILSON_VERTICAL
         )
         sophie_awaitable = self.sophie.move_to_joint_configuration(
             HOME_JOINTS_SOPHIE
@@ -168,8 +169,11 @@ class UR5eStation(BaseEnv):
     def move_robot_to_tcp_pose(self, pose):
         self.teleop_robot.move_to_tcp_pose(pose).wait()
 
-    def move_robot_to_joint_pose(self, pose):
+    def move_teleop_robot_to_joint_pose(self, pose):
         self.teleop_robot.move_to_joint_configuration(pose).wait()
+
+    def move_teleop_robot_to_home_pose(self):
+        self.teleop_robot.move_to_joint_configuration(HOME_JOINTS_SOPHIE).wait()
 
     def move_gripper(self, width):
         self.gripper_teleop.move(width).wait()
@@ -196,8 +200,8 @@ class UR5eStation(BaseEnv):
 
         # resize images
 
-        wrist_image_resized = cv2.resize(wrist_image, (320, 240), interpolation=cv2.INTER_CUBIC)
-        scene_image_resized = cv2.resize(scene_image, (320, 240), interpolation=cv2.INTER_CUBIC)
+        wrist_image_resized = cv2.resize(wrist_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+        scene_image_resized = cv2.resize(scene_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
 
         obs_dict = {
             "wrist_image_original": wrist_image,
@@ -280,7 +284,11 @@ class UR5eStation(BaseEnv):
             joint_diff = abs(robot_pose[:6] - self.teleop_robot.get_joint_configuration())
             if np.max(joint_diff) > MAX_JOINT_DELTA:
                 logger.warning(f"Joints {joint_diff > MAX_JOINT_DELTA} move too far from current pose, clipping rotation.")
-                robot_pose[joint_diff > MAX_JOINT_DELTA] = MAX_JOINT_DELTA
+                robot_pose[:6] = self.teleop_robot.get_joint_configuration() + np.clip(
+                    robot_pose[:6] - self.teleop_robot.get_joint_configuration(),
+                    -MAX_JOINT_DELTA,
+                    MAX_JOINT_DELTA,
+                )
                 valid_pose = True
 
             if robot_pose_se3[2, 3] < 0.0:
@@ -301,7 +309,8 @@ class UR5eStation(BaseEnv):
             gripper_width = self.gripper_hold.gripper_specs.max_width - np.clip(
                 gripper_pose, self.gripper_hold.gripper_specs.min_width, self.gripper_hold.gripper_specs.max_width
             )
-
+            if gripper_width < self.gripper_hold.gripper_specs.min_width + 0.005:
+                gripper_width = self.gripper_hold.gripper_specs.min_width
             logger.debug(f"Setting gripper width to {gripper_width}")
             time_before_gripper = time.time()
             self.gripper_hold.servo(gripper_width)
@@ -310,6 +319,15 @@ class UR5eStation(BaseEnv):
 
         # do not wait, handling timings is the responsibility of the caller
         return
+
+    def toggle_holding_gripper(self):
+        logger.info("Toggling holding gripper.")
+        if self.gripper_hold.get_current_width() > 0.04:
+            logger.info("Closing holding gripper.")
+            self.gripper_hold.close().wait()
+        else:
+            logger.info("Opening holding gripper.")
+            self.gripper_hold.open().wait()
 
     def close(self):
         self._wrist_camera_publisher.stop()

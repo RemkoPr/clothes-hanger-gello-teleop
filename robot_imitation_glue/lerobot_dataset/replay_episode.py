@@ -32,7 +32,7 @@ def replay_episode(
     )
 
     input(f"Press Enter to move robot to initial pose \n {initial_robot_pose}")
-    env.move_robot_to_joint_pose(initial_robot_pose)
+    env.move_teleop_robot_to_joint_pose(initial_robot_pose)
     env.move_gripper(initial_gripper)
 
     # convert torch image to numpy image

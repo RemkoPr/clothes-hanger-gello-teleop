@@ -43,7 +43,7 @@ class BaseEnv(abc.ABC):
         """move robot to a given SE3 tcp pose"""
 
     @abc.abstractmethod
-    def move_robot_to_joint_pose(self, pose):
+    def move_teleop_robot_to_joint_pose(self, pose):
         """move robot to a given joint pose"""
 
     @abc.abstractmethod

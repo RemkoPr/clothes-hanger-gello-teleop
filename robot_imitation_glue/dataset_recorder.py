@@ -134,6 +134,10 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
             frame[key] = torch.tensor(obs[key])
         self.lerobot_dataset.add_frame(frame)  # This is slow
 
+    def clear_episode(self):
+        # Clear the current episode data
+        self.lerobot_dataset.clear_episode_buffer()
+
     def save_episode(self):
         # TODO add frames here to dataset
         self.lerobot_dataset.save_episode()

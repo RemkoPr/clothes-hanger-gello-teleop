@@ -70,7 +70,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--sync", action="store_true")
-    parser.add_argument("--dataset_name", type=str, default=f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}")
+    #parser.add_argument("--dataset_name", type=str, default=f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}")
+    parser.add_argument("--dataset_name", type=str, default=f"clothes-hanger-raw")
     args = parser.parse_args()
 
     env = UR5eStation()

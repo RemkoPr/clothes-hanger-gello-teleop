@@ -10,6 +10,7 @@ import rerun as rr
 
 from robot_imitation_glue.base import BaseAgent, BaseDatasetRecorder, BaseEnv
 from robot_imitation_glue.utils import precise_wait
+from robot_imitation_glue.ur5station.ur5_robot_env import convert_gello_actions_to_joint_space_robot_pose
 
 converter_callable = Callable[dict[str, np.ndarray], np.ndarray]
 
@@ -29,6 +30,9 @@ class Event:
     pause = False
     resume = False
     quit = False
+    do_toggle_gripper = False
+    do_reset = False
+    cancel_recording = False
 
     def clear(self):
         for attr in self.__dict__:
@@ -45,6 +49,8 @@ def init_keyboard_listener(event: Event, state: State):
 
     def on_press(key):
         try:
+            #if hasattr(key, "char"):
+            #    print(f"Key pressed: {key.char}")
             # "space bar"
             if key == keyboard.Key.enter and not state.is_recording:
                 event.start_recording = True
@@ -60,6 +66,17 @@ def init_keyboard_listener(event: Event, state: State):
                 # resume the episode
                 event.resume = True
 
+            elif hasattr(key, "char") and key.char == "c" and state.is_recording:
+                event.cancel_recording = True
+
+            elif hasattr(key, "char") and key.char == "g" and state.is_paused:
+                # open the gripper that should hold the T-shirt
+                event.do_toggle_gripper = True
+
+            elif hasattr(key, "char") and key.char == "r" and state.is_paused:
+                # move robot to initial pose
+                event.do_reset = True
+
             elif hasattr(key, "char") and key.char == "q":
                 event.quit = True
 
@@ -67,7 +84,7 @@ def init_keyboard_listener(event: Event, state: State):
                 # delete the last episode
                 event.delete_last = True
         except Exception as e:
-            print(f"Error handling key press: {e}")
+            logger.error(f"Error handling key press: {e}")
 
     listener = keyboard.Listener(on_press=on_press)
     listener.start()
@@ -108,32 +125,57 @@ def collect_data(  # noqa: C901
 
         # update & handle state machine events
         if not state.is_recording and event.start_recording:
+            logger.info("======================= Start recording")
             state.is_recording = True
-            print("start recording")
             dataset_recorder.start_episode()
 
         elif state.is_recording and event.stop_recording:
+            logger.info("======================= Stop recording")
             state.is_recording = False
-            print("stop recording")
             # save episode
             dataset_recorder.save_episode()
             # TODO: allow for textual description of the episode?
+            state.is_paused = True
+
+        elif state.is_recording and event.cancel_recording:
+            logger.info("======================= Cancel and stop recording")
+            state.is_recording = False
+            dataset_recorder.clear_episode()
 
         elif event.delete_last and not state.is_recording:
-            print("delete last episode")
-            # delete last episode
+            logger.info("======================= Delete last episode")
             raise NotImplementedError("delete last episode not implemented")
 
         elif event.pause and not state.is_recording:
             state.is_paused = True
-            print("pause teleop")
+            logger.info("======================= Pause teleop")
 
         elif event.resume and state.is_paused:
             state.is_paused = False
-            print("resume teleop")
+            logger.info("======================= Resume teleop, first move slowly to current teleop pose")
+            action = teleop_agent.get_action(env.get_observations())
+            logger.debug(f"Action: {action}")
+            initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
+                env.get_joint_configuration(), np.array([env.get_gripper_openings()[0]]), action
+            )
+            logger.info(f"Moving to current teleop pose: {initial_pose}")
+            env.teleop_robot.move_to_joint_configuration(initial_pose).wait()
+            logger.info("======================= Resuming teleop.")
+
+        elif event.do_toggle_gripper and state.is_paused:
+            event.do_toggle_gripper = False
+            env.toggle_holding_gripper()
+            logger.info("======================= Toggling gripper")
+
+        elif event.do_reset and state.is_paused:
+            event.do_reset = False
+            logger.info("======================= Resetting robot to initial pose")
+            # move robot to initial pose
+            env.move_teleop_robot_to_home_pose()
+
 
         elif event.quit:
-            print("quit")
+            logger.info("quit")
             state.is_stopped = True
             listener.stop()
             dataset_recorder.finish_recording()
@@ -197,7 +239,7 @@ def collect_data(  # noqa: C901
         if cycle_end_time > time.time():
             precise_wait(cycle_end_time)
         else:
-            print("cycle time exceeded control period")
+            logger.warning("cycle time exceeded control period")
 
         # update the target pose and target gripper state for the next iteration
         target_pose = new_robot_target_pose
