@@ -5,6 +5,7 @@ import loguru
 import numpy as np
 import rerun as rr
 
+from robot_imitation_glue.ur5station.ur5_robot_env import convert_gello_actions_to_joint_space_robot_pose
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from robot_imitation_glue.base import BaseAgent, BaseDatasetRecorder, BaseEnv
 from robot_imitation_glue.utils import precise_wait
@@ -28,6 +29,8 @@ class Event:
     pause = False
     resume = False
     quit = False
+    do_toggle_gripper = False
+    do_reset = False
 
     def clear(self):
         for attr in self.__dict__:
@@ -51,13 +54,21 @@ def init_keyboard_listener(event: Event, state: State):
             elif key == keyboard.Key.enter and state.rollout_active:
                 event.stop_rollout = True
 
-            elif hasattr(key, "char") and key.char == "p" and not state.rollout_active and not state.is_paused:
+            elif hasattr(key, "char") and key.char == "p" and not state.is_paused:
                 # pause the episode
                 event.pause = True
 
             elif hasattr(key, "char") and key.char == "p" and state.is_paused:
                 # resume the episode
                 event.resume = True
+
+            elif hasattr(key, "char") and key.char == "g" and state.is_paused:
+                # toggle the gripper that should hold the T-shirt
+                event.do_toggle_gripper = True
+
+            elif hasattr(key, "char") and key.char == "r" and state.is_paused:
+                # move robot to initial pose
+                event.do_reset = True
 
             elif hasattr(key, "char") and key.char == "q":
                 event.quit = True
@@ -116,6 +127,17 @@ def eval(  # noqa: C901
     control_period = 1 / fps
     num_rollouts = recorder.n_recorded_episodes
 
+    target_pose = env.get_joint_configuration()  # actually current pose
+    target_gripper_state = env.get_gripper_openings()[1]
+
+    logger.info("Start teleop")
+    logger.debug("move robot to current teleop pose")
+    # first move slowly to the initial pose of the teleop device
+    action = teleop_agent.get_action(env.get_observations())
+    robot_pose, gripper_state = teleop_to_pose_converter(target_pose, target_gripper_state, action)
+    env.move_teleop_robot_to_joint_pose(robot_pose)
+    logger.debug("robot moved to teleop pose")
+
     while not state.is_stopped:
 
         initial_scene_image = None
@@ -150,18 +172,7 @@ def eval(  # noqa: C901
                 # show initial scene image
                 rr.log("initial_scene_image", rr.Image(initial_scene_image))
 
-        target_pose = env.get_robot_pose_se3()
-        target_gripper_state = env.get_gripper_opening()
-
-        logger.info("Start teleop")
-        logger.debug("moveL robot to current teleop pose")
-        # first move slowly to the initial pose of the teleop device
-        action = teleop_agent.get_action(env.get_observations())
-        robot_pose, gripper_state = teleop_to_pose_converter(target_pose, target_gripper_state, action)
-        env.move_robot_to_tcp_pose(robot_pose)
-        logger.debug("robot moved to teleop pose")
-
-        while not state.rollout_active:
+        while not state.rollout_active:  # teleop phase
             cycle_end_time = time.time() + control_period
 
             observations = env.get_observations()
@@ -173,6 +184,45 @@ def eval(  # noqa: C901
                 blended_image = cv2.addWeighted(initial_scene_image, 0.5, vis_image, 0.5, 0)
                 rr.log("initial_scene_image", rr.Image(blended_image))
 
+            # Handle events
+            if event.quit:
+                state.is_stopped = True
+                listener.stop()
+                recorder.finish_recording()
+                logger.info("Stop evaluation")
+                return        
+            elif event.pause:
+                state.is_paused = True
+                logger.info("======================= Pause teleop")
+            elif event.start_rollout:
+                state.rollout_active = True
+            elif event.resume and state.is_paused:
+                state.is_paused = False
+                logger.info("======================= Resume teleop, first move slowly to current teleop pose")
+                action = teleop_agent.get_action(observations)
+                logger.debug(f"Action: {action}")
+                initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
+                    env.get_joint_configuration(), np.array([env.get_gripper_openings()[0]]), action
+                )
+                logger.info(f"Moving to current teleop pose: {initial_pose}")
+                env.teleop_robot.move_to_joint_configuration(initial_pose).wait()
+                logger.info("======================= Resuming teleop.")
+            elif event.do_toggle_gripper and state.is_paused:
+                event.do_toggle_gripper = False
+                logger.info("======================= Toggling gripper")
+                env.toggle_holding_gripper()
+            elif event.do_reset and state.is_paused:
+                logger.info("======================= Resetting robot to initial pose")
+                # move robot to initial pose
+                env.move_teleop_robot_to_home_pose()
+                
+            event.clear()
+
+            if state.is_paused:
+                time.sleep(0.1)
+                continue
+
+
             action = teleop_agent.get_action(observations)
             logger.debug(f"teleop action: {action}")
 
@@ -181,24 +231,13 @@ def eval(  # noqa: C901
             logger.debug(f"robot_target_pose: {target_pose}")
 
             env.act(
-                robot_pose_se3=target_pose,
+                robot_pose=target_pose,
                 gripper_pose=target_gripper_state,
                 timestamp=time.time() + control_period,
             )
 
             if cycle_end_time > time.time():
                 precise_wait(cycle_end_time)
-
-            if event.quit:
-                state.is_stopped = True
-                listener.stop()
-                recorder.finish_recording()
-                logger.info("Stop evaluation")
-                return
-
-            if event.start_rollout:
-                state.rollout_active = True
-            event.clear()
 
         logger.info("Start rollout")
         recorder.start_episode()
@@ -223,6 +262,13 @@ def eval(  # noqa: C901
                 1,
             )
             rr.log("scene", rr.Image(vis_image))
+            
+            if event.quit:
+                logger.info("======================= Stop rollout, pause")
+                recorder.clear_episode()
+                state.is_paused = True
+                state.rollout_active = False
+                continue
 
             action = policy_agent.get_action(observations)
             logger.debug(f"policy action: {action}")
@@ -235,7 +281,7 @@ def eval(  # noqa: C901
             logger.debug(f"current robot pose: {env.get_robot_pose_se3()}")
 
             env.act(
-                robot_pose_se3=new_robot_target_pose,
+                robot_pose=new_robot_target_pose,
                 gripper_pose=new_target_gripper_state,
                 timestamp=time.time() + control_period,
             )
@@ -255,6 +301,7 @@ def eval(  # noqa: C901
                 recorder.save_episode()
                 event.clear()
                 logger.info(f"Saved episode {recorder.n_recorded_episodes}")
+                state.is_paused = True
 
 
 if __name__ == "__main__":

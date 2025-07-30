@@ -17,6 +17,11 @@ python lerobot/lerobot/scripts/train.py --config_path=robot_imitation_glue/ur5st
 
 model size parameters in config: "down_dims", "kernel_size", "diffusion_step_embed_dim",
 
+
+screen -S session_name -> starts session
+ctrl+a ctrl+d -> detaches session
+screen -Rd session_name -> reattaches session
+
 ## Evaluation
 
 robot_imitation_glue > ur5station > eval_diffusion_lerobot.py

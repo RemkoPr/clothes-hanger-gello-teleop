@@ -26,6 +26,7 @@ from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscri
 # env consists of 1 zed scene camera, 1 wrist  realsense cameras and a UR5e robot + Schunk gripper
 
 WRIST_REALSENSE_SERIAL = "817612070315"
+WRIST_REALSENSE_SERIAL = "130322271048"
 WRIST_CAM_RGB_TOPIC = "wrist_rgb"
 WRIST_CAM_RESOLUTION_TOPIC = "wrist_resolution"
 
@@ -88,6 +89,7 @@ class UR5eStation(BaseEnv):
         self.sophie = URrtde(SOPHIE_IP, URrtde.UR3E_CONFIG, gripper=self.gripper_sophie)
 
         self.teleop_robot = self.sophie
+        self.hold_robot = self.wilson
         self.gripper_teleop = self.gripper_sophie
         self.gripper_hold = self.gripper_wilson
 
@@ -143,6 +145,7 @@ class UR5eStation(BaseEnv):
 
         wilson_awaitable.wait()
         sophie_awaitable.wait()
+        self.wilson_base_pose = self.wilson.get_tcp_pose()
         
         if INIT_GRASPS:
             input("Grasp shirt?")
@@ -169,8 +172,8 @@ class UR5eStation(BaseEnv):
     def move_robot_to_tcp_pose(self, pose):
         self.teleop_robot.move_to_tcp_pose(pose).wait()
 
-    def move_teleop_robot_to_joint_pose(self, pose):
-        self.teleop_robot.move_to_joint_configuration(pose).wait()
+    def move_teleop_robot_to_joint_pose(self, joint_config):
+        self.teleop_robot.move_to_joint_configuration(joint_config).wait()
 
     def move_teleop_robot_to_home_pose(self):
         self.teleop_robot.move_to_joint_configuration(HOME_JOINTS_SOPHIE).wait()
@@ -329,6 +332,13 @@ class UR5eStation(BaseEnv):
             logger.info("Opening holding gripper.")
             self.gripper_hold.open().wait()
 
+    def move_hold_robot_random_translation(self, max_translation=0.05):
+        translation = np.random.uniform(-max_translation, max_translation, size=3)
+        translation[2] = 0.0
+        new_pose = self.wilson_base_pose.copy()
+        new_pose[:3, 3] += translation
+        self.hold_robot.move_linear_to_tcp_pose(new_pose).wait()
+
     def close(self):
         self._wrist_camera_publisher.stop()
         self._scene_camera_publisher.stop()
@@ -370,12 +380,13 @@ def abs_joint_policy_action_to_joint_pose(current_pose, current_gripper_state, a
     return joints, gripper
 
 
-dynamixel_config = DynamixelConfig(
+'''dynamixel_config = DynamixelConfig(
     joint_ids=[1, 2, 3, 4, 5, 6],
     joint_offsets=(np.array([40, 16, 25, 40, 15, 7]) * np.pi / 16).tolist(),
     joint_signs=[1, 1, -1, 1, 1, 1],
     gripper_config=(7, 194, 152),
-)
+)'''
+
 if __name__ == "__main__":
     # set cli logging level to debug
 

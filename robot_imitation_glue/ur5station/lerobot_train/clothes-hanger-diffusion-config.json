@@ -1,7 +1,7 @@
 {
     "dataset": {
-        "repo_id": "clothes-hanger-repo",
-        "root": "datasets/clothes-hanger-prepr",
+        "repo_id": "clothes-hanger-repo-v3",
+        "root": "datasets/clothes-hanger-v3-prepr-w500",
         "episodes": null,
         "image_transforms": {
             "enable": false,
@@ -78,16 +78,16 @@
                 "type": "VISUAL",
                 "shape": [
                     3,
-                    480,
-                    640
+                    720,
+                    500
                 ]
             },
             "observation.images.scene_image": {
                 "type": "VISUAL",
                 "shape": [
                     3,
-                    480,
-                    640
+                    720,
+                    500
                 ]
             },
             "observation.state": {
@@ -101,7 +101,7 @@
             "action": {
                 "type": "ACTION",
                 "shape": [
-                    10
+                    7
                 ]
             }
         },
@@ -112,10 +112,10 @@
         "drop_n_last_frames": 7,
         "vision_backbone": "resnet18",
         "crop_shape": [
-            224,
-            288
+            720,
+            450
         ],
-        "crop_is_random": false,
+        "crop_is_random": true,
         "pretrained_backbone_weights": null,
         "use_group_norm": true,
         "spatial_softmax_num_keypoints": 32,
@@ -149,7 +149,7 @@
         "scheduler_name": "cosine",
         "scheduler_warmup_steps": 500
     },
-    "job_name": "clothes-hanger-test",
+    "job_name": "clothes-hanger-v3",
     "resume": false,
     "seed": 2025,
     "num_workers": 8,

@@ -19,24 +19,12 @@ resize = (crop_width, 720)
 
 def features_transform(features):
     features["observation.state"] = features.pop("state")
-    features["observation.state"]["shape"] = (11,)
+    features["observation.state"]["shape"] = (7,)
     features["observation.images.wrist_image"] = features.pop("wrist_image")
     features["observation.images.wrist_image"]["shape"] = (3, resize[1], resize[0])
     features["observation.images.scene_image"] = features.pop("scene_image")
     features["observation.images.scene_image"]["shape"] = (3, resize[1], resize[0])
     features["action"]["shape"] = (7,)
-
-    print("processed features:")
-    print(features)
-    return features
-
-
-def eef_features_transform(features):
-    features["observation.state"] = features.pop("state")
-    features["observation.state"]["shape"] = (7,)
-    features["observation.images.wrist_image"] = features.pop("wrist_image")
-    features["observation.images.scene_image"] = features.pop("scene_image")
-    features["action"]["shape"] = (10,)
 
     print("processed features:")
     print(features)
@@ -57,7 +45,7 @@ def joints_frame_transform(frame):
     new_frame.pop("scene_image")
     new_frame.pop("wrist_image")
     new_frame.pop("state")
-    new_frame["observation.state"] = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32)  # TODO add clothse_hanger vals
+    new_frame["observation.state"] = np.concatenate([current_joints, current_gripper]).astype(np.float32)
     new_frame["action"] = np.concatenate([action_joints, action_gripper]).astype(np.float32)
     new_frame["observation.images.scene_image"] = scene_image
     new_frame["observation.images.wrist_image"] = wrist_image
@@ -65,23 +53,10 @@ def joints_frame_transform(frame):
     return new_frame
 
 
-def ee_pose_frame_transform(frame):
-    new_frame = frame.copy()
-    new_frame["observation.state"] = frame["state"]
-    new_frame["action"] = frame["action"]
-    new_frame["observation.images.scene_image"] = frame["scene_image"]
-    new_frame["observation.images.wrist_image"] = frame["wrist_image"]
-    new_frame.pop("scene_image")
-    new_frame.pop("wrist_image")
-    new_frame.pop("state")
-
-    return new_frame
-
-
 transform_dataset(
     root_dir="datasets/clothes-hanger-raw",
-    new_root_dir="datasets/clothes-hanger-v3-prepr-w500",
-    repo_id="clothes-hanger-repo-v3",
+    new_root_dir="datasets/clothes-hanger-v2-prepr-w500-visionOnly",
+    repo_id="clothes-hanger-repo-visionOnly",
     transform_fn=joints_frame_transform,  # 
     transform_features_fn=features_transform,
     features_to_drop=features_to_drop,

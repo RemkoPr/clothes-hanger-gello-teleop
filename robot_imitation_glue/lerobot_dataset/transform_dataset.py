@@ -92,7 +92,9 @@ def transform_dataset(  # noqa: C901
     # Apply feature transformation if provided
     if transform_features_fn is not None:
         new_features = transform_features_fn(new_features)
-
+    #print("======================== new features ========================")
+    #print(new_features)
+    #print("==============================================================")
     # Create a new empty dataset
     if verbose:
         print(f"Creating new dataset at {new_root_dir}")

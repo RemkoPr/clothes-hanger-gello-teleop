@@ -38,6 +38,8 @@ def abs_joints_to_policy_action_converter(robot_pose, gripper_pose, abs_joint_ac
     policy_action = policy_action.astype(np.float32)
     return policy_action
 
+def policy_action_converter_nop(robot_pose, gripper_pose, policy_action):
+    return policy_action[:6], policy_action[6]
 
 def policy_action_to_abs_se3_converter(robot_pose, gripper_pose, policy_action):
     policy_action = policy_action.astype(np.float64)

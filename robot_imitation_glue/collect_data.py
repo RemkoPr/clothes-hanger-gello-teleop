@@ -32,6 +32,7 @@ class Event:
     quit = False
     do_toggle_gripper = False
     do_reset = False
+    do_randomise_hold_pose = False
     cancel_recording = False
 
     def clear(self):
@@ -76,6 +77,9 @@ def init_keyboard_listener(event: Event, state: State):
             elif hasattr(key, "char") and key.char == "r" and state.is_paused:
                 # move robot to initial pose
                 event.do_reset = True
+
+            elif hasattr(key, "char") and key.char == "m" and state.is_paused:
+                event.do_randomise_hold_pose = True
 
             elif hasattr(key, "char") and key.char == "q":
                 event.quit = True
@@ -163,16 +167,17 @@ def collect_data(  # noqa: C901
             logger.info("======================= Resuming teleop.")
 
         elif event.do_toggle_gripper and state.is_paused:
-            event.do_toggle_gripper = False
-            env.toggle_holding_gripper()
             logger.info("======================= Toggling gripper")
+            env.toggle_holding_gripper()
+
+        elif event.do_randomise_hold_pose and state.is_paused:
+            logger.info("======================= Randomising T-shirt hold pose")
+            env.move_hold_robot_random_translation()
 
         elif event.do_reset and state.is_paused:
-            event.do_reset = False
             logger.info("======================= Resetting robot to initial pose")
             # move robot to initial pose
             env.move_teleop_robot_to_home_pose()
-
 
         elif event.quit:
             logger.info("quit")
@@ -213,9 +218,7 @@ def collect_data(  # noqa: C901
         action = teleop_agent.get_action(observation)
         logger.info(f"Action: {action}")
 
-        new_robot_target_pose, new_gripper_target_width = teleop_to_pose_converter(
-            target_pose, target_gripper_state, action
-        )
+        new_robot_target_pose, new_gripper_target_width = teleop_to_pose_converter(target_pose, target_gripper_state, action)
 
         # store the actions in absolute format, to facilitate any action conversion later on.
         # observation["target_abs_robot_se3e_pose"] = new_robot_target_se3_pose
