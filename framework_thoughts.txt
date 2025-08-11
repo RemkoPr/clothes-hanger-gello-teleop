@@ -1,0 +1,9 @@
+We want to determine the robot setup (arms, grippers, cameras, sensors, teleop) in one file and one file only. 
+
+We should be able to easily link different teleop "joints" to different robot outputs (cfr, for clothes hanger, the arm joints controlled Sophie, but the gello trigger controlled the gripper on Wilson). 
+
+Both tool space and joint space teleop should be possible.
+
+I'd prefer a window that must be active for the data collection control keys (pause control, start/stop recording, ...) to work. It can be nice during e.g. evaluation to take notes about the trials, which at this moment would activate a bunch of control commands.
+
+The preprocessor should be stored along with the training data/the trained model, to avoid incongruence between data collection preprocessing and inference preprocessing

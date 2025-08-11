@@ -17,6 +17,7 @@ from airo_robots.manipulators.hardware.ur_rtde import URrtde
 from airo_spatial_algebra.se3 import SE3Container, normalize_so3_matrix
 from ur_analytic_ik import ur5e
 from clothes_hanger import ClothesHanger, ClothesHangerMock
+from functools import partial
 
 from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
 from robot_imitation_glue.base import BaseEnv
@@ -25,10 +26,13 @@ from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscri
 
 # env consists of 1 zed scene camera, 1 wrist  realsense cameras and a UR5e robot + Schunk gripper
 
-WRIST_REALSENSE_SERIAL = "817612070315"
-WRIST_REALSENSE_SERIAL = "130322271048"
-WRIST_CAM_RGB_TOPIC = "wrist_rgb"
-WRIST_CAM_RESOLUTION_TOPIC = "wrist_resolution"
+WRIST_SOPHIE_REALSENSE_SERIAL = "817612070315"
+WRIST_SOPHIE_CAM_RGB_TOPIC = "wrist_sophie_rgb"
+WRIST_SOPHIE_CAM_RESOLUTION_TOPIC = "wrist_sophie_resolution"
+
+WRIST_WILSON_REALSENSE_SERIAL = "130322271048"
+WRIST_WILSON_CAM_RGB_TOPIC = "wrist_wilson_rgb"
+WRIST_WILSON_CAM_RESOLUTION_TOPIC = "wrist_wilson_resolution"
 
 SCENE_ZED_SERIAL = "38633712"
 SCENE_CAM_RGB_TOPIC = "scene_rgb"
@@ -55,8 +59,8 @@ MAX_TRANSLATION = 0.15
 MAX_JOINT_DELTA = 10 * np.pi / 180
 
 class CameraFactory:
-    def create_wrist_camera():
-        return Realsense(resolution=Realsense.RESOLUTION_720, fps=30, serial_number=WRIST_REALSENSE_SERIAL)
+    def create_wrist_camera(serial_number):
+        return Realsense(resolution=Realsense.RESOLUTION_720, fps=30, serial_number=serial_number)
 
     def create_scene_camera():
         return Zed(
@@ -106,19 +110,34 @@ class UR5eStation(BaseEnv):
             HOME_JOINTS_SOPHIE
         )  # do not wait, let cameras initialize first'''
 
-        logger.info("Creating wrist camera publisher.")
-        self._wrist_camera_publisher = RGBCameraPublisher(
-            CameraFactory.create_wrist_camera,
-            WRIST_CAM_RGB_TOPIC,
-            WRIST_CAM_RESOLUTION_TOPIC,
+        logger.info("Creating Wilson wrist camera publisher.")
+        self._wrist_wilson_camera_publisher = RGBCameraPublisher(
+            partial(CameraFactory.create_wrist_camera, serial_number=WRIST_WILSON_REALSENSE_SERIAL),
+            WRIST_WILSON_CAM_RGB_TOPIC,
+            WRIST_WILSON_CAM_RESOLUTION_TOPIC,
             100,
         )
-        self._wrist_camera_publisher.start()
+        self._wrist_wilson_camera_publisher.start()
 
-        logger.info("Creating wrist camera subscriber.")
-        self._wrist_camera_subscriber = RGBCameraSubscriber(
-            WRIST_CAM_RESOLUTION_TOPIC,
-            WRIST_CAM_RGB_TOPIC,
+        logger.info("Creating Sophie wrist camera publisher.")
+        self._wrist_sophie_camera_publisher = RGBCameraPublisher(
+            partial(CameraFactory.create_wrist_camera, serial_number=WRIST_SOPHIE_REALSENSE_SERIAL),
+            WRIST_SOPHIE_CAM_RGB_TOPIC,
+            WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
+            100,
+        )
+        self._wrist_sophie_camera_publisher.start()
+
+        logger.info("Creating Wilson wrist camera subscriber.")
+        self._wrist_wilson_camera_subscriber = RGBCameraSubscriber(
+            WRIST_WILSON_CAM_RESOLUTION_TOPIC,
+            WRIST_WILSON_CAM_RGB_TOPIC,
+        )
+
+        logger.info("Creating Sophie wrist camera subscriber.")
+        self._wrist_sophie_camera_subscriber = RGBCameraSubscriber(
+            WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
+            WRIST_SOPHIE_CAM_RGB_TOPIC,
         )
 
         logger.info("Creating scene camera publisher.")
@@ -136,10 +155,6 @@ class UR5eStation(BaseEnv):
             SCENE_CAM_RGB_TOPIC,
         )
 
-        self._wrist_camera_subscriber = RGBCameraSubscriber(
-            WRIST_CAM_RESOLUTION_TOPIC,
-            WRIST_CAM_RGB_TOPIC,
-        )
         # wait for first images
         time.sleep(2)
 
@@ -191,7 +206,8 @@ class UR5eStation(BaseEnv):
     def get_observations(self):
 
         start_time = time.time()
-        wrist_image = self._wrist_camera_subscriber.get_rgb_image_as_int()
+        wrist_wilson_image = self._wrist_wilson_camera_subscriber.get_rgb_image_as_int()
+        wrist_sophie_image = self._wrist_sophie_camera_subscriber.get_rgb_image_as_int()
         scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()
         robot_state = self.get_joint_configuration().astype(np.float32)  # set to joint configuration
         gripper_states = self.get_gripper_openings().astype(np.float32)
@@ -203,13 +219,16 @@ class UR5eStation(BaseEnv):
 
         # resize images
 
-        wrist_image_resized = cv2.resize(wrist_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+        wrist_wilson_image_resized = cv2.resize(wrist_wilson_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+        wrist_sophie_image_resized = cv2.resize(wrist_sophie_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
         scene_image_resized = cv2.resize(scene_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
 
         obs_dict = {
-            "wrist_image_original": wrist_image,
+            "wrist_sophie_image_original": wrist_sophie_image,
+            "wrist_wilson_image_original": wrist_wilson_image,
             "scene_image_original": scene_image,
-            "wrist_image": wrist_image_resized,
+            "wrist_wilson_image": wrist_wilson_image_resized,
+            "wrist_sophie_image": wrist_sophie_image_resized,
             "scene_image": scene_image_resized,
             "state": state,
             "robot_pose": robot_state,

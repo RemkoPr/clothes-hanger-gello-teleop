@@ -3,6 +3,7 @@ import torch
 import os
 import cv2
 from loguru import logger
+import rerun as rr
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from robot_imitation_glue.agents.gello.gello_agent import GelloAgent, DynamixelConfig
@@ -21,21 +22,28 @@ if __name__ == "__main__":
     #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-prepr-cropped-w500"  # preprocessed train dataset
     #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-06-23/14-18-43_clothes-hanger-v1-visionOnly/checkpoints/100000/pretrained_model"
     #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-prepr-cropped-w500-visionOnly"  # preprocessed train dataset
-    checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-07-17/12-34-09_clothes-hanger-v3/checkpoints/100000/pretrained_model"
-    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3-prepr-w500"  # preprocessed train dataset
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-07-17/12-34-09_clothes-hanger-v3/checkpoints/100000/pretrained_model"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3-prepr-w500"  # preprocessed train dataset
+    checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-08/18-23-04_clothes-hanger-v3.3/checkpoints/100000/pretrained_model"
+    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p3-w426h480"  # preprocessed train dataset
     
     eval_scenarios_dataset_path = train_dataset_path  # "/home/tlips/Code/robot-imitation-glue/datasets/pick-cube-eval-scenarios"  # Potentially set to train dataset to mimic initial state of certain training episode to check if policy works on "seen sample"
 
-    eval_dataset_name = "clothes-hanger-v3-prepr-w500-EVAL"  # Name for 'new' dataset of all rollouts for evaluation after 
+    eval_dataset_name = "clothes-hanger-v3p3-EVAL"  # Name for 'new' dataset of all rollouts for evaluation after 
     #eval_dataset_name = "tmp"
 
-    crop_width_range = (320+25, 960-140-25)
+    crop_width_range = (320+0, 960-0)
     crop_width = crop_width_range[1] - crop_width_range[0]
-    resize = (crop_width, 720)
+    crop_height_range = (0, 720)
+    crop_height = crop_height_range[1] - crop_height_range[0]
+    crop_width = crop_width_range[1] - crop_width_range[0]
+    resize = (2*crop_width//3, 2*crop_height//3)
+    train_crop_cutoff = (0, 0)  # 10 left and right, 0 top and bottom
 
     def preprocessor(obs_dict, VISION_ONLY=False):
         scene_img = obs_dict["scene_image"]
-        wrist_img = obs_dict["wrist_image"]
+        wrist_wilson_img = obs_dict["wrist_wilson_image"]
+        wrist_sophie_img = obs_dict["wrist_sophie_image"]
         state = obs_dict["state"]
 
         current_joints = obs_dict["joints"]
@@ -50,18 +58,26 @@ if __name__ == "__main__":
         #scene_image = torch.tensor(scene_img).float() / 255.0
         #wrist_image = torch.tensor(wrist_img).float() / 255.0
         #scene_img = np.zeros(scene_img.shape)
-        scene_image = torch.tensor(cv2.resize(np.array(scene_img)[:, crop_width_range[0]+70:crop_width_range[1]+70], resize, interpolation=cv2.INTER_CUBIC)).float() / 255.0
-        wrist_image = torch.tensor(cv2.resize(np.array(wrist_img)[:, crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_CUBIC)).float() / 255.0
-        scene_image = scene_image.permute(2, 0, 1)
-        wrist_image = wrist_image.permute(2, 0, 1)
+        scene_image = torch.tensor(cv2.resize(np.array(scene_img)[crop_height_range[0]:crop_height_range[1], crop_width_range[0]+70:crop_width_range[1]+70], resize, interpolation=cv2.INTER_LINEAR)).float() / 255.0
+        wrist_wilson_image = cv2.resize(np.array(wrist_wilson_img)[:, crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_LINEAR)
+        wrist_wilson_image = np.array(wrist_wilson_image)[train_crop_cutoff[0]:-train_crop_cutoff[0] if train_crop_cutoff[0] > 0 else None, train_crop_cutoff[1]:-train_crop_cutoff[1] if train_crop_cutoff[1] > 0 else None]
+        wrist_wilson_image = torch.tensor(wrist_wilson_image).float() / 255.0
+        wrist_sophie_image = cv2.resize(np.array(wrist_sophie_img)[:, crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_LINEAR)
+        wrist_sophie_image = np.array(wrist_sophie_image)[train_crop_cutoff[0]:-train_crop_cutoff[0] if train_crop_cutoff[0] > 0 else None, train_crop_cutoff[1]:-train_crop_cutoff[1] if train_crop_cutoff[1] > 0 else None]
+        wrist_sophie_image = torch.tensor(wrist_sophie_image).float() / 255.0
+        
+        rr.log("scene_image", rr.Image(scene_image))
+        rr.log("wrist_wilson_image", rr.Image(wrist_wilson_image))
+        rr.log("wrist_sophie_image", rr.Image(wrist_sophie_image))
 
-        # unsqueeze images
-        scene_image = scene_image.unsqueeze(0)
-        wrist_image = wrist_image.unsqueeze(0)
+        scene_image = scene_image.permute(2, 0, 1).unsqueeze(0)
+        wrist_wilson_image = wrist_wilson_image.permute(2, 0, 1).unsqueeze(0)
+        wrist_sophie_image = wrist_sophie_image.permute(2, 0, 1).unsqueeze(0)
 
         return {
             "observation.images.scene_image": scene_image,
-            "observation.images.wrist_image": wrist_image,
+            "observation.images.wrist_wilson_image": wrist_wilson_image,
+            "observation.images.wrist_sophie_image": wrist_sophie_image,
             "observation.state": state,
         }
 

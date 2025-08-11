@@ -207,7 +207,8 @@ def collect_data(  # noqa: C901
             2,
         )
         rr.log("image", rr.Image(vis_img, rr.ColorModel.RGB))
-        rr.log("wrist_image", rr.Image(observation["wrist_image"], rr.ColorModel.RGB))
+        rr.log("wrist_sophie_image", rr.Image(observation["wrist_sophie_image"], rr.ColorModel.RGB))
+        rr.log("wrist_wilson_image", rr.Image(observation["wrist_wilson_image"], rr.ColorModel.RGB))
         rr.log("scene_image", rr.Image(observation["scene_image"], rr.ColorModel.RGB))
 
         # if paused, do not collect teleop or execute action
