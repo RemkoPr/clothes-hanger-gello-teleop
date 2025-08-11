@@ -7,53 +7,19 @@ from matplotlib.widgets import Slider
 from loguru import logger
 import numpy as np
 import torch
-import cv2
 
 
 ACTION_IDX = 0
 
 
 def preprocessor(obs_dict):
-    crop_width_range = (320+0, 960-0)
-    crop_width = crop_width_range[1] - crop_width_range[0]
-    crop_height_range = (0, 720)
-    crop_height = crop_height_range[1] - crop_height_range[0]
-    crop_width = crop_width_range[1] - crop_width_range[0]
-    resize = (2*crop_width//3, 2*crop_height//3)
-    train_crop_cutoff = (0, 0)  # 10 left and right, 0 top and bottom
-    scene_img = obs_dict["scene_image"]
-    print("=======================")
-    print(scene_img)
-    wrist_wilson_img = obs_dict["wrist_wilson_image"]
-    wrist_sophie_img = obs_dict["wrist_sophie_image"]
-    state = obs_dict["state"]
+    # In this script, we load the preprocessed dataset, so no additional preprocessing is needed.
+    return obs_dict
 
-    current_joints = obs_dict["joints"]
-    current_gripper = np.array([obs_dict["gripper_states"][1]])
-    clothes_hanger = obs_dict["clothes_hanger"]
-    state = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32)
-    state = torch.tensor(state).float().unsqueeze(0)
-
-    scene_image = torch.tensor(cv2.resize(np.array(scene_img)[crop_height_range[0]:crop_height_range[1], crop_width_range[0]+70:crop_width_range[1]+70], resize, interpolation=cv2.INTER_LINEAR)).float() / 255.0
-    wrist_wilson_image = cv2.resize(np.array(wrist_wilson_img)[:, crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_LINEAR)
-    wrist_wilson_image = np.array(wrist_wilson_image)[train_crop_cutoff[0]:-train_crop_cutoff[0] if train_crop_cutoff[0] > 0 else None, train_crop_cutoff[1]:-train_crop_cutoff[1] if train_crop_cutoff[1] > 0 else None]
-    wrist_wilson_image = torch.tensor(wrist_wilson_image).float() / 255.0
-    wrist_sophie_image = cv2.resize(np.array(wrist_sophie_img)[:, crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_LINEAR)
-    wrist_sophie_image = np.array(wrist_sophie_image)[train_crop_cutoff[0]:-train_crop_cutoff[0] if train_crop_cutoff[0] > 0 else None, train_crop_cutoff[1]:-train_crop_cutoff[1] if train_crop_cutoff[1] > 0 else None]
-    wrist_sophie_image = torch.tensor(wrist_sophie_image).float() / 255.0
-    scene_image = scene_image.permute(2, 0, 1).unsqueeze(0)
-    wrist_wilson_image = wrist_wilson_image.permute(2, 0, 1).unsqueeze(0)
-    wrist_sophie_image = wrist_sophie_image.permute(2, 0, 1).unsqueeze(0)
-
-    return {
-        "observation.images.scene_image": scene_image,
-        "observation.images.wrist_wilson_image": wrist_wilson_image,
-        "observation.images.wrist_sophie_image": wrist_sophie_image,
-        "observation.state": state,
-    }
 
 # Load train data
-root_dir="datasets/clothes-hanger-v3-raw"
+root_dir="datasets/clothes-hanger-v3p3-w426h480"
+#root_dir="datasets/clothes-hanger-v3-raw"
 repo_id="tmp"#"clothes-hanger-repo-v3p3",
 dataset = LeRobotDataset(repo_id=repo_id, root=root_dir)
 
@@ -77,13 +43,16 @@ lerobot_agent = LerobotAgent(policy, "cuda", preprocessor)
 predicted_actions = []
 for i in range(episode_start_idx, episode_to_idx):
     obs = dataset[i]
-    preprocessed_obs = preprocessor(obs)
-    action = lerobot_agent.get_action(preprocessed_obs)
+    # drop "task" key
+    obs.pop("task", None)
+    action = lerobot_agent.get_action(obs)  # preprocessing happens in the agent
     predicted_actions.append(action[ACTION_IDX])
 
 # Extract all actions for the action plot
 actions = [dataset[idx]["action"][ACTION_IDX] for idx in range(episode_start_idx, episode_to_idx)]
 n = len(actions)
+assert(len(actions) == len(predicted_actions))
+
 
 # --- Create the figure layout ---
 fig = plt.figure(figsize=(12, 8))
@@ -97,15 +66,15 @@ ax_sophie = fig.add_subplot(2, 3, 3)
 ax_action = fig.add_subplot(2, 1, 2)
 
 # Display initial images
-im_scene = ax_scene.imshow(dataset[episode_start_idx]["scene_image"].cpu().numpy().transpose(1, 2, 0))
+im_scene = ax_scene.imshow(dataset[episode_start_idx]["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
 ax_scene.set_title("Scene Image")
 ax_scene.axis("off")
 
-im_wilson = ax_wilson.imshow(dataset[episode_start_idx]["wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
+im_wilson = ax_wilson.imshow(dataset[episode_start_idx]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
 ax_wilson.set_title("Wrist Wilson Image")
 ax_wilson.axis("off")
 
-im_sophie = ax_sophie.imshow(dataset[episode_start_idx]["wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+im_sophie = ax_sophie.imshow(dataset[episode_start_idx]["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
 ax_sophie.set_title("Wrist Sophie Image")
 ax_sophie.axis("off")
 
@@ -127,9 +96,9 @@ slider = Slider(ax_slider, 'Index', episode_start_idx, episode_to_idx, valinit=e
 # --- Update function ---
 def update(val):
     i = int(slider.val)
-    im_scene.set_data(dataset[i]["scene_image"].cpu().numpy().transpose(1, 2, 0))
-    im_wilson.set_data(dataset[i]["wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
-    im_sophie.set_data(dataset[i]["wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+    im_scene.set_data(dataset[i]["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
+    im_wilson.set_data(dataset[i]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
+    im_sophie.set_data(dataset[i]["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
     vline.set_xdata([i, i])
     fig.canvas.draw_idle()
 
