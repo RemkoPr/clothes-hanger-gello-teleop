@@ -9,15 +9,15 @@ import torch
 # ------------------------
 # Load dataset & policy
 # ------------------------
-root_dir = "datasets/clothes-hanger-v3p3-w426h480"
+root_dir = "datasets/clothes-hanger-prepr-cropped-w500"
 repo_id = "tmp"
 dataset = LeRobotDataset(repo_id=repo_id, root=root_dir)
 
 episode_indices = dataset.episode_data_index
 logger.debug(f"episode_indices = {episode_indices}")
 
-checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-08/18-23-04_clothes-hanger-v3.3/checkpoints/100000/pretrained_model"
-train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p3-w426h480"
+checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-06-17/18-16-06_clothes-hanger-v1/checkpoints/100000/pretrained_model"
+train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-prepr-cropped-w500"
 policy = make_lerobot_policy(checkpoint_path, train_dataset_path)
 lerobot_agent = LerobotAgent(policy, "cuda", lambda obs: obs)
 
@@ -25,7 +25,7 @@ lerobot_agent = LerobotAgent(policy, "cuda", lambda obs: obs)
 # Globals (will be changed by UI)
 # ------------------------
 episode_idx = 0   # which episode to show (editable via TextBox)
-ACTION_IDX = 0    # which action dim to plot (0..6)
+ACTION_IDX = 0    # which action dim to plot (0..7)
 slider_idx = None # will hold the index Slider object
 ax_slider_idx = None
 
@@ -49,10 +49,10 @@ def load_episode(idx):
         item = dataset[i]
         # copy or shallow-cast to dict to avoid changing the dataset
         obs = dict(item)
-        obs.pop("task")
-        pred = lerobot_agent.get_action(obs)  # expected shape (7,)
+        obs.pop("task", None)
+        pred = lerobot_agent.get_action(obs)  # expected shape (8,)
         pred_actions_list.append(np.asarray(pred))            # ensure numpy
-        true_actions_list.append(np.asarray(obs["action"]))  # ensure numpy
+        true_actions_list.append(np.asarray(item["action"]))  # ensure numpy
 
     true_actions = np.stack(true_actions_list)   # shape (n, 8)
     pred_actions = np.stack(pred_actions_list)   # shape (n, 8)
@@ -76,17 +76,13 @@ im_scene = ax_scene.imshow(dataset[episode_start_idx]["observation.images.scene_
 ax_scene.set_title("Scene Image")
 ax_scene.axis("off")
 
-im_wilson = ax_wilson.imshow(dataset[episode_start_idx]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
-ax_wilson.set_title("Wrist Wilson Image")
-ax_wilson.axis("off")
-
-im_sophie = ax_sophie.imshow(dataset[episode_start_idx]["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
-ax_sophie.set_title("Wrist Sophie Image")
+im_sophie = ax_sophie.imshow(dataset[episode_start_idx]["observation.images.wrist_image"].cpu().numpy().transpose(1, 2, 0))
+ax_sophie.set_title("Wrist (Sophie) Image")
 ax_sophie.axis("off")
 
 # initial action plot: x is relative index 0..n-1
 x = np.arange(n)
-line_real, = ax_action.plot(x, true_actions[:, ACTION_IDX], label="Action", linewidth=5)
+line_real, = ax_action.plot(x, true_actions[:, ACTION_IDX], label="Action")
 line_pred, = ax_action.plot(x, pred_actions[:, ACTION_IDX], label="Predicted action")
 vline = ax_action.axvline(0, color="r", linestyle="--", label="Current index (relative)")
 ax_action.set_xlabel("Relative index (0 .. n-1)")
@@ -117,8 +113,7 @@ def update_frame(val):
     i_abs = episode_start_idx + i_rel     # absolute dataset index
     # update images
     im_scene.set_data(dataset[i_abs]["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
-    im_wilson.set_data(dataset[i_abs]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
-    im_sophie.set_data(dataset[i_abs]["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+    im_sophie.set_data(dataset[i_abs]["observation.images.wrist_image"].cpu().numpy().transpose(1, 2, 0))
     # vertical line should be on the same relative x-axis as the action plot
     vline.set_xdata([i_rel, i_rel])
     fig.canvas.draw_idle()
@@ -154,8 +149,7 @@ def set_episode(text):
 
     # Update images to first frame of the new episode
     im_scene.set_data(dataset[episode_start_idx]["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
-    im_wilson.set_data(dataset[episode_start_idx]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
-    im_sophie.set_data(dataset[episode_start_idx]["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+    im_sophie.set_data(dataset[episode_start_idx]["observation.images.wrist_image"].cpu().numpy().transpose(1, 2, 0))
 
     # Rebuild x-data for action lines to match new n
     x = np.arange(n)
