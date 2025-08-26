@@ -68,7 +68,7 @@ def joints_frame_transform(frame):
     new_frame.pop("wrist_wilson_image")
     new_frame.pop("wrist_sophie_image")
     new_frame.pop("state")
-    new_frame["observation.state"] = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32)  # TODO add clothse_hanger vals
+    new_frame["observation.state"] = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32)  # TODO add clothes_hanger vals
     new_frame["action"] = np.concatenate([action_joints, action_gripper]).astype(np.float32)
     new_frame["observation.images.scene_image"] = scene_image
     new_frame["observation.images.wrist_wilson_image"] = wrist_wilson_image
@@ -91,11 +91,11 @@ def joints_frame_transform(frame):
 
 
 transform_dataset(
-    root_dir="datasets/clothes-hanger-v3-raw",
-    new_root_dir=f"datasets/tmp",#clothes-hanger-v3p3-w{resize[0]}h{resize[1]}",
-    repo_id="tmp",#"clothes-hanger-repo-v3p3",
+    root_dir="datasets/clothes-hanger-v3-test-raw",
+    new_root_dir=f"clothes-hanger-v3-test-w{resize[0]}h{resize[1]}",
+    repo_id="clothes-hanger-repo-v3-test",
     transform_fn=joints_frame_transform,  # 
     transform_features_fn=features_transform,
     features_to_drop=features_to_drop,
-    episodes_to_drop=[i for i in range(1, 179)], #[140, 171]#
+    episodes_to_drop=[]#[i for i in range(1, 179)], #[140, 171]#
 )

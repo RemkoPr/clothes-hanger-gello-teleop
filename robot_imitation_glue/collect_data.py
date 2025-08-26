@@ -144,6 +144,7 @@ def collect_data(  # noqa: C901
         elif state.is_recording and event.cancel_recording:
             logger.info("======================= Cancel and stop recording")
             state.is_recording = False
+            time.sleep(0.5)  # avoid erasing images that are currently being written
             dataset_recorder.clear_episode()
 
         elif event.delete_last and not state.is_recording:

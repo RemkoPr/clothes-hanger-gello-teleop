@@ -7,3 +7,5 @@ Both tool space and joint space teleop should be possible.
 I'd prefer a window that must be active for the data collection control keys (pause control, start/stop recording, ...) to work. It can be nice during e.g. evaluation to take notes about the trials, which at this moment would activate a bunch of control commands.
 
 The preprocessor should be stored along with the training data/the trained model, to avoid incongruence between data collection preprocessing and inference preprocessing
+
+We should think about aliases for observation names. Descriptive keys like "observation.images.left_wrist_image" are nice because the dataset itself tells you more about which physical camera this observation belongs to, as opposed to e.g. "observation.images.wrist1_image"

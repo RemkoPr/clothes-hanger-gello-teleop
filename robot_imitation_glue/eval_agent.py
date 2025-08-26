@@ -31,6 +31,7 @@ class Event:
     quit = False
     do_toggle_gripper = False
     do_reset = False
+    cancel_rollout = False
 
     def clear(self):
         for attr in self.__dict__:
@@ -57,6 +58,9 @@ def init_keyboard_listener(event: Event, state: State):
             elif hasattr(key, "char") and key.char == "p" and not state.is_paused:
                 # pause the episode
                 event.pause = True
+
+            elif hasattr(key, "char") and key.char == "c" and state.rollout_active:
+                event.cancel_rollout = True
 
             elif hasattr(key, "char") and key.char == "p" and state.is_paused:
                 # resume the episode
@@ -245,6 +249,7 @@ def eval(  # noqa: C901
         # reset to clear action buffers for chunking agents
         policy_agent.reset()
 
+        # Rollout phase
         while not state.is_stopped and state.rollout_active:
             cycle_end_time = time.time() + control_period
 
@@ -270,6 +275,15 @@ def eval(  # noqa: C901
                 state.rollout_active = False
                 continue
 
+            if event.cancel_rollout:
+                logger.info("======================= Cancel rollout, deleting episode and pause")
+                state.rollout_active = False
+                time.sleep(0.5)  # avoid erasing images that are currently being written
+                recorder.clear_episode()
+                event.clear()
+                state.is_paused = True
+                continue
+            
             action = policy_agent.get_action(observations)
             logger.debug(f"policy action: {action}")
 

@@ -30,8 +30,6 @@ def abs_se3_to_policy_action_converter(robot_pose, gripper_pose, abs_se3_action,
 
 
 def abs_joints_to_policy_action_converter(robot_pose, gripper_pose, abs_joint_action, gripper_action):
-    """absolute poses, encoded as position, x-vector of rotation, y-vector of rotation, gripper action"""
-
     policy_action = np.zeros(7)
     policy_action[:6] = abs_joint_action
     policy_action[6] = gripper_action

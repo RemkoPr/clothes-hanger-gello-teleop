@@ -2,6 +2,8 @@
 
 python lerobot/lerobot/scripts/visualize_dataset_html.py   --root datasets/2025-04-29_15-40-01/ --force-override 1 --repo-id test/test
 
+In the above, the --repo-id doesn't matter, so literally test/test is fine.
+
 ## Preprocessing
 
 robot_imitation_glue > ur5station > prepare_datasets.py
