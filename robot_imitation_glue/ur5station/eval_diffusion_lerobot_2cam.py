@@ -23,10 +23,12 @@ if __name__ == "__main__":
     checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-13/18-32-38_clothes-hanger-v3.5-2cam/checkpoints/100000/pretrained_model"
     train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p5-w500h720-2cam"  # preprocessed train dataset
     
-    #eval_scenarios_dataset_path = train_dataset_path  # "/home/tlips/Code/robot-imitation-glue/datasets/pick-cube-eval-scenarios"  # Potentially set to train dataset to mimic initial state of certain training episode to check if policy works on "seen sample"
-    eval_scenarios_dataset_path = "clothes-hanger-v3p6-2cam-visionOnly-EVAL"
+    eval_scenarios_dataset_path = train_dataset_path  # Potentially set to train dataset to mimic initial state of certain training episode to check if policy works on "seen sample"
+    #eval_scenarios_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p6-2cam-visionOnly-EVAL"
+    eval_scenarios_dataset = None
+    #eval_scenarios_dataset = LeRobotDataset(repo_id="repo-id", root=eval_scenarios_dataset_path)
 
-    eval_dataset_name = "tmp2"#"clothes-hanger-v3p6-2cam-visionOnly-EVAL"  # Name for 'new' dataset of all rollouts for evaluation after 
+    eval_dataset_name = "clothes-hanger-v3p5-2cam-EVAL"#"clothes-hanger-v3-augmented-raw"#"clothes-hanger-v3p6-2cam-visionOnly-EVAL"  # Name for dataset where to store rollout observations
     
     WRIST_CAM_TO_INCLUDE = "wilson"
     WRIST_CAM_TO_EXCLUDE = "sophie"
@@ -61,8 +63,8 @@ if __name__ == "__main__":
         wrist_image = np.array(wrist_image)[train_crop_cutoff[0]:-train_crop_cutoff[0] if train_crop_cutoff[0] > 0 else None, train_crop_cutoff[1]:-train_crop_cutoff[1] if train_crop_cutoff[1] > 0 else None]
         wrist_image = torch.tensor(wrist_image).float() / 255.0
         
-        rr.log("scene_image", rr.Image(scene_image))
-        rr.log(f"wrist_{WRIST_CAM_TO_INCLUDE}_image", rr.Image(wrist_image))
+        rr.log("prepr_scene_image", rr.Image(scene_image))
+        rr.log(f"prepr_wrist_{WRIST_CAM_TO_INCLUDE}_image", rr.Image(wrist_image))
 
         scene_image = scene_image.permute(2, 0, 1).unsqueeze(0)
         wrist_image = wrist_image.permute(2, 0, 1).unsqueeze(0)
@@ -103,9 +105,6 @@ if __name__ == "__main__":
         use_videos=True,
     )
 
-    #eval_scenarios_dataset = None
-    eval_scenarios_dataset = LeRobotDataset(repo_id="", root=eval_scenarios_dataset_path)
-
     input("Press Enter to start evaluation (should hold your teleop in place now!)")
     eval(
         env,
@@ -116,6 +115,7 @@ if __name__ == "__main__":
         teleop_to_pose_converter=convert_gello_actions_to_joint_space_robot_pose,
         fps=10,
         eval_dataset=eval_scenarios_dataset,
-        eval_dataset_image_key="observation.images.scene_image",
-        env_observation_image_key="scene_image",
+        eval_dataset_image_keys=["scene_image", "wrist_"+WRIST_CAM_TO_INCLUDE+"_image"],  # images to overlay with eval episode to align initial state
+        env_observation_image_keys=["scene_image", "wrist_"+WRIST_CAM_TO_INCLUDE+"_image"],  # images to monitor during evaluation
+        eval_dataset_episode=46
     )

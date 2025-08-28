@@ -98,7 +98,7 @@ class UR5eStation(BaseEnv):
         self.gripper_hold = self.gripper_wilson
 
         self.clothes_hanger = ClothesHanger()
-        self.clothes_hanger.read()  # Test if clothes hanger can be read
+        init_vals = self.clothes_hanger.read()  # Test if clothes hanger can be read to catch errors early
 
         if INIT_GRASPS:
             self.wilson.gripper.open()
@@ -161,6 +161,11 @@ class UR5eStation(BaseEnv):
         wilson_awaitable.wait()
         sophie_awaitable.wait()
         self.wilson_base_pose = self.wilson.get_tcp_pose()
+
+        init_vals = self.clothes_hanger.read()
+        offsets = init_vals - np.array([227, 239, 217, 211])  # Set initial offsets. TODO: make offset depend on training dataset
+        self.clothes_hanger.set_offsets(offsets)
+        logger.warning(f"Using clothes hanger offsets: {offsets}")
         
         if INIT_GRASPS:
             input("Grasp shirt?")

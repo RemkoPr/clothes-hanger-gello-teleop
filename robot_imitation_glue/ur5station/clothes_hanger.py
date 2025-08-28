@@ -17,15 +17,22 @@ class ClothesHanger:
         topic = Topic(domain_participant, topic_name="Clotheshanger", data_type=Clotheshanger)
         qos = Qos(Policy.History.KeepLast(1))  # Only ever take the last available data published to a topic
 
+        self.offsets = np.array([0, 0, 0, 0])
         self.reader = DataReader(domain_participant, topic, listener=listener, qos=qos)
 
     def read(self):
-        values = np.array(self.reader.take_one(timeout=duration(seconds=5)).taxel_values).astype(np.uint8)
+        values = np.array(self.reader.take_one(timeout=duration(seconds=5)).taxel_values).astype(np.uint8) - self.offsets
         return values
+    
+    def set_offsets(self, offsets):
+        pass
     
 class ClothesHangerMock:
     def read(self):
         return np.array([0 for _ in range(4)])
+    
+    def set_offsets(self, offsets):
+        pass
 
 
 if __name__ == "__main__":

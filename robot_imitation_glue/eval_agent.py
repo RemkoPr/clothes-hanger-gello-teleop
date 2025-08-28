@@ -98,8 +98,9 @@ def eval(  # noqa: C901
     teleop_to_pose_converter,
     fps=10,
     eval_dataset: LeRobotDataset = None,
-    eval_dataset_image_key: str = "scene",
-    env_observation_image_key: str = "scene",
+    eval_dataset_image_keys: list = ["scene"],
+    env_observation_image_keys: list = ["scene"],
+    eval_dataset_episode: int = -1
 ):
     """
     Evalulate a (policy) agent on a robot environment.
@@ -119,7 +120,7 @@ def eval(  # noqa: C901
         teleop_to_pose_converter: function to convert teleop action to robot pose
         fps: frames per second for the dataset recorder
         eval_dataset: dataset to load initial scene image from
-        eval_dataset_image_key: key in the dataset to load the image from
+        eval_dataset_image_keys: key in the dataset to load the image from
 
     """
     state = State()
@@ -144,49 +145,54 @@ def eval(  # noqa: C901
 
     while not state.is_stopped:
 
-        initial_scene_image = None
+        initial_images = {}
         instruction = None
 
         # load initial image from the dataset if provided. display it on top of the current scene image,
         # this allows to set the initial state of the scene.
         if eval_dataset is not None:
             n_dataset_episodes = eval_dataset.num_episodes
-            if num_rollouts < n_dataset_episodes:
+            '''if num_rollouts < n_dataset_episodes:
                 eval_dataset_episode = num_rollouts
             else:
-                eval_dataset_episode = -1
+                eval_dataset_episode = -1'''
 
             if eval_dataset_episode > -1:
-                # get initial scene image
+                # get initial images
                 print(eval_dataset.episode_data_index)
-                step_idx = eval_dataset.episode_data_index["from"][eval_dataset_episode].item()
-                initial_scene_image = eval_dataset[step_idx][eval_dataset_image_key]
+                for eval_dataset_image_key in eval_dataset_image_keys:
+                    step_idx = eval_dataset.episode_data_index["from"][eval_dataset_episode].item()
+                    initial_image = eval_dataset[step_idx][eval_dataset_image_key]
 
-                # convert to numpy array of uint8 values
-                initial_scene_image = initial_scene_image.permute(1, 2, 0).numpy()
-                initial_scene_image *= 255
-                initial_scene_image = initial_scene_image.astype(np.uint8)
+                    # convert to numpy array of uint8 values
+                    initial_image = initial_image.permute(1, 2, 0).numpy()
+                    initial_image *= 255
+                    initial_image = initial_image.astype(np.uint8)
+                    initial_images[eval_dataset_image_key] = initial_image
+                    instruction = eval_dataset[step_idx]["task"]
+                    logger.info(
+                        f"Loading initial state of episode {eval_dataset_episode} from eval dataset with instruction: {instruction}."
+                    )
+                    if initial_image is not None:
+                        # show initial scene image
+                        rr.log(f"initial_"+eval_dataset_image_key, rr.Image(initial_image))
 
-                instruction = eval_dataset[step_idx]["task"]
-                logger.info(
-                    f"Loading initial state of episode {eval_dataset_episode} from eval dataset with instruction: {instruction}."
-                )
-
-            if initial_scene_image is not None:
-                # show initial scene image
-                rr.log("initial_scene_image", rr.Image(initial_scene_image))
 
         while not state.rollout_active:  # teleop phase
             cycle_end_time = time.time() + control_period
 
             observations = env.get_observations()
 
-            vis_image = observations[env_observation_image_key]
-            rr.log("scene", rr.Image(vis_image))
-            if initial_scene_image is not None:
-                # blend initial scene image with current scene image
-                blended_image = cv2.addWeighted(initial_scene_image, 0.5, vis_image, 0.5, 0)
-                rr.log("initial_scene_image", rr.Image(blended_image))
+            for env_observation_image_key in env_observation_image_keys:
+                vis_image = observations[env_observation_image_key]
+                rr.log(env_observation_image_key, rr.Image(vis_image))
+            if eval_dataset is not None:
+                for eval_dataset_image_key in eval_dataset_image_keys:
+                    if initial_images[eval_dataset_image_key] is not None:
+                        # blend current image with initial image
+                        vis_image = initial_images[eval_dataset_image_key]
+                        blended_image = cv2.addWeighted(observations[eval_dataset_image_key], 0.5, vis_image, 0.5, 0)
+                        rr.log(f"initial_"+eval_dataset_image_key, rr.Image(blended_image))
 
             # Handle events
             if event.quit:
@@ -255,18 +261,19 @@ def eval(  # noqa: C901
 
             observations = env.get_observations()
 
-            vis_image = observations[env_observation_image_key]
-            ## print number of episodes to image
-            cv2.putText(
-                vis_image,
-                f"Episode: {recorder.n_recorded_episodes}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                1,
-            )
-            rr.log("scene", rr.Image(vis_image))
+            for env_observation_image_key in env_observation_image_keys:
+                vis_image = observations[env_observation_image_key].copy()
+                # print number of episodes to image
+                cv2.putText(
+                    vis_image,
+                    f"Episode: {recorder.n_recorded_episodes}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    1,
+                )
+                rr.log(env_observation_image_key, rr.Image(vis_image))
             
             if event.quit:
                 logger.info("======================= Stop rollout, pause")

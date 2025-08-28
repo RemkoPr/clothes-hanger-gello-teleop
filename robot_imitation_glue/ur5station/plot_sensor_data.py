@@ -2,6 +2,7 @@ from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from robot_imitation_glue.agents.lerobot_agent import LerobotAgent, make_lerobot_policy
 import matplotlib.pyplot as plt
 from loguru import logger
+import numpy as np
 
 
 class SensorPlotter:
@@ -22,7 +23,7 @@ class SensorPlotter:
         for idx, episode_indices in enumerate(self.episode_indices_list):
             logger.debug(f"Dataset {idx}: episode_indices = {episode_indices}")
 
-        self.observation_index = 5
+        self.observation_index = 0
 
         # Matplotlib handles
         self.fig = None
@@ -44,6 +45,12 @@ class SensorPlotter:
             for start_idx in episode_indices["from"]:
                 item = dict(dataset[int(start_idx) + self.observation_index])
                 sensor_obs_list.append(item["clothes_hanger"])
+            episodes_to_exclude_from_mean = [83, 156, 173, 174]
+            sensor_obs_list_for_mean = [
+                obs for idx, obs in enumerate(sensor_obs_list) if idx not in episodes_to_exclude_from_mean
+            ]
+            mean_sensor_obs = np.mean(sensor_obs_list_for_mean, axis=0)
+            logger.info(f"{dataset_root} | mean_sensor_obs = {mean_sensor_obs}")
 
             ax.plot(sensor_obs_list)
             ax.set_title(dataset_root, fontsize=12)
