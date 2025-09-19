@@ -61,13 +61,13 @@ def joints_frame_transform(frame):
 
     return new_frame
 
-
 transform_dataset(
-    root_dir="datasets/clothes-hanger-v3-raw",
-    new_root_dir=f"datasets/clothes-hanger-v3p7-w{resize[0]}h{resize[1]}-2cam-visionOnly-n100",
-    repo_id="clothes-hanger-repo-v3p7",
+    root_dir="datasets/clothes-hanger-v3p5-2cam-EVAL",
+    #new_root_dir=f"datasets/clothes-hanger-v3p7-w{resize[0]}h{resize[1]}-2cam-visionOnly-n100",
+    new_root_dir=f"datasets/clothes-hanger-v3p5-EVAL-successes-visionOnly",
+    repo_id="clothes-hanger-repo-v3p5-extracts",
     transform_fn=joints_frame_transform,  # 
     transform_features_fn=features_transform,
     features_to_drop=features_to_drop,
-    episodes_to_drop=[i for i in range(70)] + [i for i in range(170, 180)]#[140, 171]#[i for i in range(2, 179)], #
+    episodes_to_drop=[i for i in range(59) if i not in [24, 25, 26, 27, 29, 35, 36, 38, 39, 40, 42, 46, 47, 48, 49, 51, 52, 53, 54, 55, 56, 57, 58]] #+ [i for i in range(170, 180)]#[140, 171]#[i for i in range(2, 179)], #
 )

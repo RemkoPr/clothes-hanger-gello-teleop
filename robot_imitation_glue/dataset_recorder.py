@@ -1,4 +1,5 @@
 from pathlib import Path
+from loguru import logger
 
 import numpy as np
 import torch
@@ -71,7 +72,11 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
         # create features  using the example dict. assume all numpy arrays. 0D is a scalar, 1D with size 1 is a scalar, 1D with size > 1 is a vector, 3D is an image.
         features = self.DEFAULT_FEATURES.copy()
         for key, value in example_obs_dict.items():
-            shape = value.shape
+            try:
+                shape = value.shape
+            except Exception as e:
+                logger.error(f"Error getting shape for key {key} with value {value}: {e}")
+                raise e
             if len(shape) == 0:
                 features[key] = {"dtype": "float32", "shape": (1,), "names": None}
             elif len(shape) == 1:

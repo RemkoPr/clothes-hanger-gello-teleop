@@ -15,9 +15,9 @@ def preprocessor(obs):
     scene_image = obs["observation.images.scene_image"]
     wrist_wilson_image = obs["observation.images.wrist_wilson_image"]
     wrist_sophie_image = obs["observation.images.wrist_sophie_image"]
-    #scene_image = scene_image.permute(2, 0, 1).unsqueeze(0)
-    #wrist_wilson_image = wrist_wilson_image.permute(2, 0, 1).unsqueeze(0)
-    #wrist_sophie_image = wrist_sophie_image.permute(2, 0, 1).unsqueeze(0)
+    ##scene_image = scene_image.permute(2, 0, 1).unsqueeze(0)
+    ##wrist_wilson_image = wrist_wilson_image.permute(2, 0, 1).unsqueeze(0)
+    ##wrist_sophie_image = wrist_sophie_image.permute(2, 0, 1).unsqueeze(0)
     scene_image = scene_image.unsqueeze(0)  # TODO: why no permute needed?
     wrist_wilson_image = wrist_wilson_image.unsqueeze(0)
     wrist_sophie_image = wrist_sophie_image.unsqueeze(0)
@@ -73,14 +73,22 @@ class EpisodeViewer:
 
         true_actions_list = []
         pred_actions_list = []
+        inference_times = []
 
         logger.warning(f"Loading episode {idx} from {self.episode_start_idx} to {self.episode_to_idx}")
         for i in range(self.episode_start_idx, self.episode_to_idx):
             item = dict(self.dataset[i])  # copy to avoid changing the dataset
             item.pop("task", None)
+            t_start = torch.cuda.Event(enable_timing=True)
+            t_end = torch.cuda.Event(enable_timing=True)
+            t_start.record()
             pred = self.lerobot_agent.get_action(item)
+            t_end.record()
+            torch.cuda.synchronize()
+            inference_times.append(t_start.elapsed_time(t_end))
             pred_actions_list.append(np.asarray(pred))
             true_actions_list.append(np.asarray(item["action"]))
+        print(f'Average inference time over episode {idx}: {np.mean(inference_times[5:]):.2f} ms +/- {np.std(inference_times[5:]):.2f} ms')
         self.true_actions = np.stack(true_actions_list)
         self.pred_actions = np.stack(pred_actions_list)
         self.n = self.true_actions.shape[0]
@@ -205,10 +213,15 @@ if __name__ == "__main__":
     # Dataset to inference
     root_dir = "datasets/clothes-hanger-v3p3-w426h480"
     #root_dir = "datasets/clothes-hanger-v3-test-w426h480"
+    #root_dir = "datasets/clothes-hanger-v3p5-w500h720-2cam"
     repo_id = "clothes-hanger-repo-v3-test"
     # Model
     checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-08/18-23-04_clothes-hanger-v3.3/checkpoints/100000/pretrained_model"
     train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p3-w426h480"
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-13/18-32-38_clothes-hanger-v3.5-2cam/checkpoints/100000/pretrained_model"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p5-w500h720-2cam"
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-15/15-09-52_clothes-hanger-v3.6-2cam-visionOnly/checkpoints/100000/pretrained_model"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p6-w500h720-2cam-visionOnly"
 
     viewer = EpisodeViewer(root_dir, repo_id, checkpoint_path, train_dataset_path)
     viewer.load_episode(89)

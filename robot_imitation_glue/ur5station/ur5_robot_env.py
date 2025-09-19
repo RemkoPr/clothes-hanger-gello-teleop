@@ -26,10 +26,12 @@ from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscri
 
 # env consists of 1 zed scene camera, 1 wrist  realsense cameras and a UR5e robot + Schunk gripper
 
+INCLUDE_WRIST_SOPHIE = False
 WRIST_SOPHIE_REALSENSE_SERIAL = "817612070315"
 WRIST_SOPHIE_CAM_RGB_TOPIC = "wrist_sophie_rgb"
 WRIST_SOPHIE_CAM_RESOLUTION_TOPIC = "wrist_sophie_resolution"
 
+INCLUDE_WRIST_WILSON = True
 WRIST_WILSON_REALSENSE_SERIAL = "130322271048"
 WRIST_WILSON_CAM_RGB_TOPIC = "wrist_wilson_rgb"
 WRIST_WILSON_CAM_RESOLUTION_TOPIC = "wrist_wilson_resolution"
@@ -97,8 +99,8 @@ class UR5eStation(BaseEnv):
         self.gripper_teleop = self.gripper_sophie
         self.gripper_hold = self.gripper_wilson
 
-        self.clothes_hanger = ClothesHanger()
-        init_vals = self.clothes_hanger.read()  # Test if clothes hanger can be read to catch errors early
+        self.clothes_hanger = ClothesHanger(baseline=np.array([227, 239, 217, 211]))  # >TODO: automatically derive baseline from train set
+        self.clothes_hanger.read()  # Test if clothes hanger can be read to catch errors early
 
         if INIT_GRASPS:
             self.wilson.gripper.open()
@@ -110,35 +112,37 @@ class UR5eStation(BaseEnv):
             HOME_JOINTS_SOPHIE
         )  # do not wait, let cameras initialize first'''
 
-        logger.info("Creating Wilson wrist camera publisher.")
-        self._wrist_wilson_camera_publisher = RGBCameraPublisher(
-            partial(CameraFactory.create_wrist_camera, serial_number=WRIST_WILSON_REALSENSE_SERIAL),
-            WRIST_WILSON_CAM_RGB_TOPIC,
-            WRIST_WILSON_CAM_RESOLUTION_TOPIC,
-            100,
-        )
-        self._wrist_wilson_camera_publisher.start()
+        if INCLUDE_WRIST_WILSON:
+            logger.info("Creating Wilson wrist camera publisher.")
+            self._wrist_wilson_camera_publisher = RGBCameraPublisher(
+                partial(CameraFactory.create_wrist_camera, serial_number=WRIST_WILSON_REALSENSE_SERIAL),
+                WRIST_WILSON_CAM_RGB_TOPIC,
+                WRIST_WILSON_CAM_RESOLUTION_TOPIC,
+                100,
+            )
+            self._wrist_wilson_camera_publisher.start()
 
-        logger.info("Creating Sophie wrist camera publisher.")
-        self._wrist_sophie_camera_publisher = RGBCameraPublisher(
-            partial(CameraFactory.create_wrist_camera, serial_number=WRIST_SOPHIE_REALSENSE_SERIAL),
-            WRIST_SOPHIE_CAM_RGB_TOPIC,
-            WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
-            100,
-        )
-        self._wrist_sophie_camera_publisher.start()
+            logger.info("Creating Wilson wrist camera subscriber.")
+            self._wrist_wilson_camera_subscriber = RGBCameraSubscriber(
+                WRIST_WILSON_CAM_RESOLUTION_TOPIC,
+                WRIST_WILSON_CAM_RGB_TOPIC,
+            )
 
-        logger.info("Creating Wilson wrist camera subscriber.")
-        self._wrist_wilson_camera_subscriber = RGBCameraSubscriber(
-            WRIST_WILSON_CAM_RESOLUTION_TOPIC,
-            WRIST_WILSON_CAM_RGB_TOPIC,
-        )
+        if INCLUDE_WRIST_SOPHIE:
+            logger.info("Creating Sophie wrist camera publisher.")
+            self._wrist_sophie_camera_publisher = RGBCameraPublisher(
+                partial(CameraFactory.create_wrist_camera, serial_number=WRIST_SOPHIE_REALSENSE_SERIAL),
+                WRIST_SOPHIE_CAM_RGB_TOPIC,
+                WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
+                100,
+            )
+            self._wrist_sophie_camera_publisher.start()
 
-        logger.info("Creating Sophie wrist camera subscriber.")
-        self._wrist_sophie_camera_subscriber = RGBCameraSubscriber(
-            WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
-            WRIST_SOPHIE_CAM_RGB_TOPIC,
-        )
+            logger.info("Creating Sophie wrist camera subscriber.")
+            self._wrist_sophie_camera_subscriber = RGBCameraSubscriber(
+                WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
+                WRIST_SOPHIE_CAM_RGB_TOPIC,
+            )
 
         logger.info("Creating scene camera publisher.")
         self._scene_camera_publisher = RGBCameraPublisher(
@@ -163,9 +167,9 @@ class UR5eStation(BaseEnv):
         self.wilson_base_pose = self.wilson.get_tcp_pose()
 
         init_vals = self.clothes_hanger.read()
-        offsets = init_vals - np.array([227, 239, 217, 211])  # Set initial offsets. TODO: make offset depend on training dataset
-        self.clothes_hanger.set_offsets(offsets)
-        logger.warning(f"Using clothes hanger offsets: {offsets}")
+        self.clothes_hanger.init_offsets(init_vals)  # Set initial offsets. TODO: make offset depend on training dataset
+        self.clothes_hanger.init_thesholds()
+        logger.warning(f"Using clothes hanger baseline: {self.clothes_hanger.baseline}, thresholds: {self.clothes_hanger.thresholds}, offsets: {self.clothes_hanger.offsets}")
         
         if INIT_GRASPS:
             input("Grasp shirt?")
@@ -209,11 +213,21 @@ class UR5eStation(BaseEnv):
         self.wilson.servo_to_tcp_pose()
 
     def get_observations(self):
-
         start_time = time.time()
-        wrist_wilson_image = self._wrist_wilson_camera_subscriber.get_rgb_image_as_int()
-        wrist_sophie_image = self._wrist_sophie_camera_subscriber.get_rgb_image_as_int()
+        if INCLUDE_WRIST_WILSON:
+            wrist_wilson_image = self._wrist_wilson_camera_subscriber.get_rgb_image_as_int()
+        else:
+            wrist_wilson_image = np.zeros((720,1280,3), dtype=np.uint8)
+        if INCLUDE_WRIST_SOPHIE:
+            wrist_sophie_image = self._wrist_sophie_camera_subscriber.get_rgb_image_as_int()
+        else:
+            wrist_sophie_image = np.zeros((720,1280,3), dtype=np.uint8)
         scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()
+        
+        wrist_wilson_image_resized = cv2.resize(wrist_wilson_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+        wrist_sophie_image_resized = cv2.resize(wrist_sophie_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+        scene_image_resized = cv2.resize(scene_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+
         robot_state = self.get_joint_configuration().astype(np.float32)  # set to joint configuration
         gripper_states = self.get_gripper_openings().astype(np.float32)
         joints = self.teleop_robot.get_joint_configuration().astype(np.float32)
@@ -222,18 +236,12 @@ class UR5eStation(BaseEnv):
         #state = np.concatenate((robot_state, gripper_states), axis=0)
         state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)  # not directly used, state is instead formed in ur5station/prepare_datasets
 
-        # resize images
-
-        wrist_wilson_image_resized = cv2.resize(wrist_wilson_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
-        wrist_sophie_image_resized = cv2.resize(wrist_sophie_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
-        scene_image_resized = cv2.resize(scene_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
-
         obs_dict = {
-            "wrist_sophie_image_original": wrist_sophie_image,
             "wrist_wilson_image_original": wrist_wilson_image,
-            "scene_image_original": scene_image,
             "wrist_wilson_image": wrist_wilson_image_resized,
+            "wrist_sophie_image_original": wrist_sophie_image,
             "wrist_sophie_image": wrist_sophie_image_resized,
+            "scene_image_original": scene_image,
             "scene_image": scene_image_resized,
             "state": state,
             "robot_pose": robot_state,
@@ -241,6 +249,7 @@ class UR5eStation(BaseEnv):
             "joints": joints,
             "clothes_hanger": clothes_hanger_values,
         }
+
         logger.info(f"get_observations time: {time.time() - start_time}")
 
         # add to rerun

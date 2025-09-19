@@ -10,6 +10,9 @@ robot_imitation_glue > ur5station > prepare_datasets.py
 
 Redo visualisation above
 
+## Dataset merging
+
+python lerobot/lerobot/scripts/merge.py --sources datasets_tmp/clothes-hanger-v3p5-EVAL-successes-visionOnly/ datasets_tmp/clothes-hanger-v3p5-rollouts4augmentation-visionOnly/ datasets_tmp/clothes-hanger-v3p6-w500h720-2cam-visionOnly/ --output datasets_tmp/clothes-hanger-v8-visionAugmentedByInstrRollouts --max_dim 7 --fps 10
 
 ## Training
 

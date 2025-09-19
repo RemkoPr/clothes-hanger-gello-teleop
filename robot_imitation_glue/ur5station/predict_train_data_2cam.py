@@ -43,6 +43,7 @@ def load_episode(idx):
 
     true_actions_list = []
     pred_actions_list = []
+    inference_times = []
 
     logger.warning(f"Loading episode {episode_idx} from {episode_start_idx} to {episode_to_idx}")
     for i in range(episode_start_idx, episode_to_idx):
@@ -50,10 +51,17 @@ def load_episode(idx):
         # copy or shallow-cast to dict to avoid changing the dataset
         obs = dict(item)
         obs.pop("task", None)
+        t_start = torch.cuda.Event(enable_timing=True)
+        t_end = torch.cuda.Event(enable_timing=True)
+        t_start.record()
         pred = lerobot_agent.get_action(obs)  # expected shape (8,)
+        t_end.record()
+        torch.cuda.synchronize()
+        inference_times.append(t_start.elapsed_time(t_end))
         pred_actions_list.append(np.asarray(pred))            # ensure numpy
         true_actions_list.append(np.asarray(item["action"]))  # ensure numpy
 
+    print(f'Average inference time over episode {episode_idx}: {np.mean(inference_times):.2f} ms +/- {np.std(inference_times):.2f} ms')
     true_actions = np.stack(true_actions_list)   # shape (n, 8)
     pred_actions = np.stack(pred_actions_list)   # shape (n, 8)
     n = true_actions.shape[0]

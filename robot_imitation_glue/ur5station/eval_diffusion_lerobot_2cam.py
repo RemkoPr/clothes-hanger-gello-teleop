@@ -18,18 +18,23 @@ from robot_imitation_glue.ur5station.ur5_robot_env import (
 )
 
 if __name__ == "__main__":
-    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-20/16-19-05_clothes-hanger-v3.7-2cam-visionOnly-n50/checkpoints/100000/pretrained_model"
-    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n50"  # preprocessed train dataset
     checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-13/18-32-38_clothes-hanger-v3.5-2cam/checkpoints/100000/pretrained_model"
     train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p5-w500h720-2cam"  # preprocessed train dataset
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-15/15-09-52_clothes-hanger-v3.6-2cam-visionOnly/checkpoints/100000/pretrained_model"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p6-w500h720-2cam-visionOnly"  # preprocessed train dataset
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-28/18-40-57_clothes-hanger-v3.8-visionAugmentedByInstrRollouts/checkpoints/100000/pretrained_model"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p8-visionAugmentedByInstrRollouts"  # preprocessed train dataset
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-18/18-41-35_clothes-hanger-v3.7-2cam-n50/checkpoints/100000/pretrained_model"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-n50"  # preprocessed train dataset
+    
     
     eval_scenarios_dataset_path = train_dataset_path  # Potentially set to train dataset to mimic initial state of certain training episode to check if policy works on "seen sample"
-    #eval_scenarios_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p6-2cam-visionOnly-EVAL"
+    #eval_scenarios_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-2cam-n50-EVAL"
     eval_scenarios_dataset = None
     #eval_scenarios_dataset = LeRobotDataset(repo_id="repo-id", root=eval_scenarios_dataset_path)
 
-    eval_dataset_name = "clothes-hanger-v3p5-2cam-EVAL"#"clothes-hanger-v3-augmented-raw"#"clothes-hanger-v3p6-2cam-visionOnly-EVAL"  # Name for dataset where to store rollout observations
-    
+    eval_dataset_name = "tmp685" #"clothes-hanger-v3p8-visionAugmentedByInstrRollouts-EVAL"  # Name for dataset where to store rollout observations
+
     WRIST_CAM_TO_INCLUDE = "wilson"
     WRIST_CAM_TO_EXCLUDE = "sophie"
 
@@ -117,5 +122,5 @@ if __name__ == "__main__":
         eval_dataset=eval_scenarios_dataset,
         eval_dataset_image_keys=["scene_image", "wrist_"+WRIST_CAM_TO_INCLUDE+"_image"],  # images to overlay with eval episode to align initial state
         env_observation_image_keys=["scene_image", "wrist_"+WRIST_CAM_TO_INCLUDE+"_image"],  # images to monitor during evaluation
-        eval_dataset_episode=46
+        eval_dataset_episode=4
     )
