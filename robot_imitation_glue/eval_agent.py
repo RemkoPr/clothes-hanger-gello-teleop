@@ -127,8 +127,6 @@ def eval(  # noqa: C901
     event = Event()
     listener = init_keyboard_listener(event, state)
 
-    rr.init("robot_imitation_glue", spawn=True)
-
     control_period = 1 / fps
     num_rollouts = recorder.n_recorded_episodes
 

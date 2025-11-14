@@ -37,5 +37,5 @@ def overlay_curves(curve_dir, opacity=0.5):
     print(f"Saved white background overlay -> {out_white}")
 
 if __name__ == "__main__":
-    curve_dir = "datasets/clothes-hanger-v3p7-2cam-n50-EVAL_curves"
+    curve_dir = "datasets/spoofed_binary_clothes_hanger_EVAL_curves"
     overlay_curves(curve_dir)

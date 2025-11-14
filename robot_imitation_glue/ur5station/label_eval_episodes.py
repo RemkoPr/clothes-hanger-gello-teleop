@@ -150,14 +150,14 @@ if __name__ == "__main__":
         repo_id="repo-id",
         episodes_to_exclude=[5],
         failed_episodes=[1, 3, 4, 7, 14, 23, 29, 37, 38, 39]
-    )'''
+    )
     viewer = ImgCurveDrawer(
         dataset_root="datasets/clothes-hanger-v3p7-2cam-n50-EVAL",
         repo_id="repo-id",
         episodes_to_exclude=[4],
         failed_episodes=[1, 2, 3, 4, 5, 6, 8, 9, 17, 19, 12, 14, 15, 20]
     )
-    '''viewer = ImgCurveDrawer(
+    viewer = ImgCurveDrawer(
         dataset_root="datasets/clothes-hanger-v3p7-2cam-visionOnly-n50-EVAL",
         repo_id="repo-id",
         episodes_to_exclude=[],
@@ -175,4 +175,10 @@ if __name__ == "__main__":
         episodes_to_exclude=[],
         failed_episodes=[i for i in range(20) if i not in [0, 5, 6, 15]]
     )'''
+    viewer = ImgCurveDrawer(
+        dataset_root="datasets/spoofed_binary_clothes_hanger_EVAL",
+        repo_id="repo-id",
+        episodes_to_exclude=[0, 1, 2, 3],
+        failed_episodes=[6, 12]
+    )
     viewer.run()

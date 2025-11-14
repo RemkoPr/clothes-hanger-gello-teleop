@@ -16,7 +16,7 @@ from airo_camera_toolkit.cameras.zed.zed import Zed
 from airo_robots.manipulators.hardware.ur_rtde import URrtde
 from airo_spatial_algebra.se3 import SE3Container, normalize_so3_matrix
 from ur_analytic_ik import ur5e
-from clothes_hanger import ClothesHanger, ClothesHangerMock
+from clothes_hanger import ClothesHanger, ClothesHangerMock, ClothesHangerSpoof
 from functools import partial
 
 from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
@@ -99,8 +99,10 @@ class UR5eStation(BaseEnv):
         self.gripper_teleop = self.gripper_sophie
         self.gripper_hold = self.gripper_wilson
 
-        self.clothes_hanger = ClothesHanger(baseline=np.array([227, 239, 217, 211]))  # >TODO: automatically derive baseline from train set
+        ch_baseline = np.array([227, 239, 217, 211])
+        self.clothes_hanger = ClothesHanger(baseline=ch_baseline)  # >TODO: automatically derive baseline from train set
         self.clothes_hanger.read()  # Test if clothes hanger can be read to catch errors early
+        self.clothes_hanger_spoof = ClothesHangerSpoof(baseline=ch_baseline, concat_type="WIDTH")
 
         if INIT_GRASPS:
             self.wilson.gripper.open()
@@ -168,7 +170,7 @@ class UR5eStation(BaseEnv):
 
         init_vals = self.clothes_hanger.read()
         self.clothes_hanger.init_offsets(init_vals)  # Set initial offsets. TODO: make offset depend on training dataset
-        self.clothes_hanger.init_thesholds()
+        #self.clothes_hanger.init_thesholds()
         logger.warning(f"Using clothes hanger baseline: {self.clothes_hanger.baseline}, thresholds: {self.clothes_hanger.thresholds}, offsets: {self.clothes_hanger.offsets}")
         
         if INIT_GRASPS:
@@ -232,6 +234,10 @@ class UR5eStation(BaseEnv):
         gripper_states = self.get_gripper_openings().astype(np.float32)
         joints = self.teleop_robot.get_joint_configuration().astype(np.float32)
         clothes_hanger_values = self.clothes_hanger.read().astype(np.float32)
+        if self.clothes_hanger_spoof:
+            clothes_hanger_spoof_values = self.clothes_hanger_spoof.read(scene_img=scene_image, wrist_img=wrist_wilson_image)
+        else:
+            clothes_hanger_spoof_values = np.zeros(4, dtype=np.float32)*-1
 
         #state = np.concatenate((robot_state, gripper_states), axis=0)
         state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)  # not directly used, state is instead formed in ur5station/prepare_datasets
@@ -248,6 +254,7 @@ class UR5eStation(BaseEnv):
             "gripper_states": gripper_states,
             "joints": joints,
             "clothes_hanger": clothes_hanger_values,
+            "clothes_hanger_spoof": clothes_hanger_spoof_values,
         }
 
         logger.info(f"get_observations time: {time.time() - start_time}")

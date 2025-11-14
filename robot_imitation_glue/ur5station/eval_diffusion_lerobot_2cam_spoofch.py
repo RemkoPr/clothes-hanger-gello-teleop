@@ -33,7 +33,7 @@ if __name__ == "__main__":
     eval_scenarios_dataset = None
     #eval_scenarios_dataset = LeRobotDataset(repo_id="repo-id", root=eval_scenarios_dataset_path)
 
-    eval_dataset_name = "binary_clothes_hanger_EVAL" #"clothes-hanger-v3p8-visionAugmentedByInstrRollouts-EVAL"  # Name for dataset where to store rollout observations
+    eval_dataset_name = "spoofed_binary_clothes_hanger_EVAL" #"clothes-hanger-v3p8-visionAugmentedByInstrRollouts-EVAL"  # Name for dataset where to store rollout observations
 
     WRIST_CAM_TO_INCLUDE = "wilson"
     WRIST_CAM_TO_EXCLUDE = "sophie"
@@ -46,19 +46,9 @@ if __name__ == "__main__":
     resize = (crop_width, crop_height)
     train_crop_cutoff = (0, 0)  # 10 left and right, 0 top and bottom
 
-    def preprocessor(obs_dict, VISION_ONLY=False):
+    def image_preprocessor(obs_dict):
         scene_img = obs_dict["scene_image"]
         wrist_img = obs_dict[f"wrist_{WRIST_CAM_TO_INCLUDE}_image"]
-        state = obs_dict["state"]
-
-        current_joints = obs_dict["joints"]
-        current_gripper = np.array([obs_dict["gripper_states"][1]])
-        clothes_hanger = obs_dict["clothes_hanger"]
-        if VISION_ONLY:
-            state = np.concatenate([current_joints, current_gripper]).astype(np.float32)
-        else:
-            state = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32)
-        state = torch.tensor(state).float().unsqueeze(0)
 
         #scene_image = torch.tensor(scene_img).float() / 255.0
         #wrist_image = torch.tensor(wrist_img).float() / 255.0
@@ -77,8 +67,19 @@ if __name__ == "__main__":
         return {
             "observation.images.scene_image": scene_image,
             f"observation.images.wrist_{WRIST_CAM_TO_INCLUDE}_image": wrist_image,
-            "observation.state": state,
         }
+
+    def preprocessor(obs_dict):
+        current_joints = obs_dict["joints"]
+        current_gripper = np.array([obs_dict["gripper_states"][1]])
+        clothes_hanger = obs_dict["clothes_hanger_spoof"]
+        rr.log("clothes_hanger_spoof", rr.Scalars(clothes_hanger), rr.SeriesLines(widths=10))
+
+        state = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32)
+        state = torch.tensor(state).float().unsqueeze(0)
+        prepr_dict = image_preprocessor(obs_dict)
+        prepr_dict["observation.state"] = state
+        return prepr_dict
 
     env = UR5eStation()
     env.reset()
@@ -111,6 +112,8 @@ if __name__ == "__main__":
     )
 
     input("Press Enter to start evaluation (should hold your teleop in place now!)")
+
+    rr.init("robot_imitation_glue", spawn=True)
     eval(
         env,
         teleop_agent,
@@ -120,7 +123,7 @@ if __name__ == "__main__":
         teleop_to_pose_converter=convert_gello_actions_to_joint_space_robot_pose,
         fps=10,
         eval_dataset=eval_scenarios_dataset,
-        eval_dataset_image_keys=["scene_image", "wrist_"+WRIST_CAM_TO_INCLUDE+"_image"],  # images to overlay with eval episode to align initial state
-        env_observation_image_keys=["scene_image", "wrist_"+WRIST_CAM_TO_INCLUDE+"_image"],  # images to monitor during evaluation
+        eval_dataset_image_keys=["scene_image", "wrist_" + WRIST_CAM_TO_INCLUDE + "_image"],  # images to overlay with eval episode to align initial state
+        env_observation_image_keys=["scene_image", "wrist_" + WRIST_CAM_TO_INCLUDE + "_image"],  # images to monitor during evaluation
         eval_dataset_episode=4
     )
