@@ -133,19 +133,19 @@ class CameraFactory:
         # return OpenCVVideoCapture(resolution=(1920, 1080),  fps=30,intrinsics_matrix=np.eye(3))
         from airo_camera_toolkit.cameras.realsense.realsense import Realsense
 
-        return Realsense(resolution=Realsense.RESOLUTION_1080, fps=30)
+        return Realsense(resolution=Realsense.RESOLUTION_720, fps=30, serial_number="130322271048")
 
 
 if __name__ == "__main__":
     import cv2
 
-    initialize_ipc()
+    # initialize_ipc()
 
     TOPIC_RGB = "webcam_rgb"
     TOPIC_RESOLUTION = "webcam_resolution"
     logger.info("Creating publisher.")
 
-    publisher = RGBCameraPublisher(CameraFactory.create_camera, TOPIC_RGB, TOPIC_RESOLUTION, 100, True)
+    publisher = RGBCameraPublisher(CameraFactory.create_camera, TOPIC_RGB, TOPIC_RESOLUTION, 30, True)
     logger.info("Starting publisher.")
     publisher.start()
 

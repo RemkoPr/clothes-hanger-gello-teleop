@@ -7,38 +7,30 @@ import numpy as np
 import torch
 
 
-
-def preprocessor(obs):
-
-    state = obs["observation.state"]
-    state = torch.tensor(state).float().unsqueeze(0)
-    scene_image = obs["observation.images.scene_image"]
-    wrist_wilson_image = obs["observation.images.wrist_wilson_image"]
-    wrist_sophie_image = obs["observation.images.wrist_sophie_image"]
-    ##scene_image = scene_image.permute(2, 0, 1).unsqueeze(0)
-    ##wrist_wilson_image = wrist_wilson_image.permute(2, 0, 1).unsqueeze(0)
-    ##wrist_sophie_image = wrist_sophie_image.permute(2, 0, 1).unsqueeze(0)
-    scene_image = scene_image.unsqueeze(0)  # TODO: why no permute needed?
-    wrist_wilson_image = wrist_wilson_image.unsqueeze(0)
-    wrist_sophie_image = wrist_sophie_image.unsqueeze(0)
-    return {
-            "observation.images.scene_image": scene_image,
-            "observation.images.wrist_wilson_image": wrist_wilson_image,
-            "observation.images.wrist_sophie_image": wrist_sophie_image,
-            "observation.state": state,
-        }
-
-
 class EpisodeViewer:
-    def __init__(self, dataset_root, repo_id, checkpoint_path, train_dataset_path):
+    def __init__(self, dataset_root, repo_id, checkpoint_path, train_dataset_path, dataset_type="TRAIN", model_type="INSTR", sophie_cam=True):
+        self.sophie_cam = sophie_cam
         # Load dataset to inference
         self.dataset = LeRobotDataset(repo_id=repo_id, root=dataset_root)
+        self.checkpoint_path = checkpoint_path
+        self.train_dataset_path = train_dataset_path
+        self.dataset_root = dataset_root
+        self.dataset_type = dataset_type
+        self.model_type = model_type
+        if self.dataset_type == "TRAIN":
+            self.image_key_prefix = "observation.images."
+            self.state_key_prefix = "observation."
+        elif self.dataset_type == "EVAL":
+            self.image_key_prefix = ""
+            self.state_key_prefix = ""
+        else:
+            raise ValueError(f"Unknown dataset_type: {dataset_type}")
         self.episode_indices = self.dataset.episode_data_index
         logger.debug(f"episode_indices = {self.episode_indices}")
 
         # Load policy
         policy = make_lerobot_policy(checkpoint_path, train_dataset_path)
-        self.lerobot_agent = LerobotAgent(policy, "cuda", preprocessor)
+        self.lerobot_agent = LerobotAgent(policy, "cuda", lambda obs: self.preprocessor(obs, sophie_cam=self.sophie_cam))
 
         # State
         self.episode_idx = 0
@@ -65,6 +57,26 @@ class EpisodeViewer:
         self.slider_act = None
         self.textbox_ep = None
 
+    def preprocessor(self, obs, sophie_cam=True):
+        state = obs[self.state_key_prefix + "state"]
+        if self.dataset_type == "EVAL":
+            state = torch.cat((state[:6], state[7:]))  # Remove sophie gripper state
+        if self.model_type == "VIZ":
+            state = state[:7]  # Remove clothes hanger data
+        state = torch.tensor(state).float().unsqueeze(0)
+        scene_image = obs[self.image_key_prefix + "scene_image"].unsqueeze(0)
+        wrist_wilson_image = obs[self.image_key_prefix + "wrist_wilson_image"].unsqueeze(0)
+        if sophie_cam:
+            wrist_sophie_image = obs[self.image_key_prefix + "wrist_sophie_image"].unsqueeze(0)
+        preprocessed_obs = {
+            "observation.images.scene_image": scene_image,
+            "observation.images.wrist_wilson_image": wrist_wilson_image,
+            "observation.state": state
+        }
+        if sophie_cam:
+            preprocessed_obs["observation.images.wrist_sophie_image"] = wrist_sophie_image
+        return preprocessed_obs
+
     def load_episode(self, idx):
         """Load episode idx and compute true_actions & pred_actions arrays."""
         self.episode_idx = idx
@@ -79,10 +91,12 @@ class EpisodeViewer:
         for i in range(self.episode_start_idx, self.episode_to_idx):
             item = dict(self.dataset[i])  # copy to avoid changing the dataset
             item.pop("task", None)
+            item_no_action = item.copy()
+            item_no_action.pop("action", None)  # technically not necessary since preprocessor removes it, but for clarity (if action in obesrvation, get_action will not inference)
             t_start = torch.cuda.Event(enable_timing=True)
             t_end = torch.cuda.Event(enable_timing=True)
             t_start.record()
-            pred = self.lerobot_agent.get_action(item)
+            pred = self.lerobot_agent.get_action(item_no_action)
             t_end.record()
             torch.cuda.synchronize()
             inference_times.append(t_start.elapsed_time(t_end))
@@ -96,6 +110,9 @@ class EpisodeViewer:
     def init_plot(self):
         """Initialize figure and widgets."""
         self.fig = plt.figure(figsize=(12, 8))
+        self.fig.suptitle(f"Inference dataset: {self.dataset_root.split('/')[-1]}\
+                          \nModel: {self.checkpoint_path.split('/')[-4]}\
+                          \nTrain dataset: {self.train_dataset_path.split('/')[-1]}", fontsize=16)
         self.ax_scene = self.fig.add_subplot(2, 3, 1)
         self.ax_wilson = self.fig.add_subplot(2, 3, 2)
         self.ax_sophie = self.fig.add_subplot(2, 3, 3)
@@ -103,17 +120,18 @@ class EpisodeViewer:
 
         # Show initial images
         obs0 = self.dataset[self.episode_start_idx]
-        self.im_scene = self.ax_scene.imshow(obs0["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
+        self.im_scene = self.ax_scene.imshow(obs0[self.image_key_prefix + "scene_image"].cpu().numpy().transpose(1, 2, 0))
         self.ax_scene.set_title("Scene Image")
         self.ax_scene.axis("off")
 
-        self.im_wilson = self.ax_wilson.imshow(obs0["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
+        self.im_wilson = self.ax_wilson.imshow(obs0[self.image_key_prefix + "wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
         self.ax_wilson.set_title("Wrist Wilson Image")
         self.ax_wilson.axis("off")
 
-        self.im_sophie = self.ax_sophie.imshow(obs0["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
-        self.ax_sophie.set_title("Wrist Sophie Image")
-        self.ax_sophie.axis("off")
+        if self.sophie_cam:
+            self.im_sophie = self.ax_sophie.imshow(obs0[self.image_key_prefix + "wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+            self.ax_sophie.set_title("Wrist Sophie Image")
+            self.ax_sophie.axis("off")
 
         # Action plot
         x = np.arange(self.n)
@@ -148,9 +166,10 @@ class EpisodeViewer:
         i_rel = int(self.slider_idx.val)
         i_abs = self.episode_start_idx + i_rel
         obs = self.dataset[i_abs]
-        self.im_scene.set_data(obs["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
-        self.im_wilson.set_data(obs["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
-        self.im_sophie.set_data(obs["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+        self.im_scene.set_data(obs[self.image_key_prefix + "scene_image"].cpu().numpy().transpose(1, 2, 0))
+        self.im_wilson.set_data(obs[self.image_key_prefix + "wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
+        if self.sophie_cam:
+            self.im_sophie.set_data(obs[self.image_key_prefix + "wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
         self.vline.set_xdata([i_rel, i_rel])
         self.fig.canvas.draw_idle()
 
@@ -181,9 +200,10 @@ class EpisodeViewer:
     def update_all_plots(self):
         """Refresh everything after loading a new episode."""
         obs0 = self.dataset[self.episode_start_idx]
-        self.im_scene.set_data(obs0["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
-        self.im_wilson.set_data(obs0["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
-        self.im_sophie.set_data(obs0["observation.images.wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
+        self.im_scene.set_data(obs0[self.image_key_prefix + "scene_image"].cpu().numpy().transpose(1, 2, 0))
+        self.im_wilson.set_data(obs0[self.image_key_prefix + "wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
+        if self.sophie_cam:
+            self.im_sophie.set_data(obs0[self.image_key_prefix + "wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
 
         x = np.arange(self.n)
         curr_action_idx = max(0, min(6, int(self.slider_act.val)))
@@ -211,19 +231,31 @@ class EpisodeViewer:
 
 if __name__ == "__main__":
     # Dataset to inference
-    root_dir = "datasets/clothes-hanger-v3p3-w426h480"
+    #root_dir = "datasets/clothes-hanger-v3p3-w426h480"
     #root_dir = "datasets/clothes-hanger-v3-test-w426h480"
     #root_dir = "datasets/clothes-hanger-v3p5-w500h720-2cam"
+    #root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
+
+    #dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
+    #dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n50"
+    #dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-2cam-n50-EVAL"
+    dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-2cam-visionOnly-n100-EVAL"
+    
     repo_id = "clothes-hanger-repo-v3-test"
     # Model
-    checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-08/18-23-04_clothes-hanger-v3.3/checkpoints/100000/pretrained_model"
-    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p3-w426h480"
-    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-13/18-32-38_clothes-hanger-v3.5-2cam/checkpoints/100000/pretrained_model"
-    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p5-w500h720-2cam"
-    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-15/15-09-52_clothes-hanger-v3.6-2cam-visionOnly/checkpoints/100000/pretrained_model"
-    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p6-w500h720-2cam-visionOnly"
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-18/18-41-35_clothes-hanger-v3.7-2cam-n50/checkpoints/100000/pretrained_model"
 
-    viewer = EpisodeViewer(root_dir, repo_id, checkpoint_path, train_dataset_path)
-    viewer.load_episode(89)
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n50"
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-20/16-19-05_clothes-hanger-v3.7-2cam-visionOnly-n50/checkpoints/100000/pretrained_model"
+    
+    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n100"
+    checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-21/19-26-01_clothes-hanger-v3.7-2cam-visionOnly-n100/checkpoints/100000/pretrained_model"
+    
+    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-n100"
+    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-19/13-08-59_clothes-hanger-v3.7-2cam-n100/checkpoints/100000/pretrained_model"
+
+    viewer = EpisodeViewer(dataset_to_inference_root_dir, repo_id, checkpoint_path, train_dataset_path, dataset_type="EVAL", model_type="VIZ", sophie_cam=False)
+    viewer.load_episode(3)
     viewer.init_plot()
     viewer.show()

@@ -9,17 +9,17 @@ import torch
 # ------------------------
 # Load dataset & policy
 # ------------------------
-root_dir = "datasets/clothes-hanger-prepr-cropped-w500"
+root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
 repo_id = "tmp"
 dataset = LeRobotDataset(repo_id=repo_id, root=root_dir)
 
 episode_indices = dataset.episode_data_index
 logger.debug(f"episode_indices = {episode_indices}")
 
-checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-06-17/18-16-06_clothes-hanger-v1/checkpoints/100000/pretrained_model"
-train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-prepr-cropped-w500"
+checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-18/18-41-35_clothes-hanger-v3.7-2cam-n50/checkpoints/100000/pretrained_model"
+train_dataset_path = "/storage/rproesma/clothes-hanger/" + root_dir
 policy = make_lerobot_policy(checkpoint_path, train_dataset_path)
-lerobot_agent = LerobotAgent(policy, "cuda", lambda obs: obs)
+lerobot_agent = LerobotAgent(policy, "cuda", observation_preprocessor=lambda obs: obs)
 
 # ------------------------
 # Globals (will be changed by UI)
@@ -48,22 +48,23 @@ def load_episode(idx):
     logger.warning(f"Loading episode {episode_idx} from {episode_start_idx} to {episode_to_idx}")
     for i in range(episode_start_idx, episode_to_idx):
         item = dataset[i]
-        # copy or shallow-cast to dict to avoid changing the dataset
         obs = dict(item)
         obs.pop("task", None)
+        obs_no_action = obs.copy()
+        obs_no_action.pop("action", None)
         t_start = torch.cuda.Event(enable_timing=True)
         t_end = torch.cuda.Event(enable_timing=True)
         t_start.record()
-        pred = lerobot_agent.get_action(obs)  # expected shape (8,)
+        pred = lerobot_agent.get_action(obs_no_action)  # expected shape (7,)
         t_end.record()
         torch.cuda.synchronize()
         inference_times.append(t_start.elapsed_time(t_end))
-        pred_actions_list.append(np.asarray(pred))            # ensure numpy
-        true_actions_list.append(np.asarray(item["action"]))  # ensure numpy
+        pred_actions_list.append(np.asarray(pred))
+        true_actions_list.append(np.asarray(item["action"]))
 
     print(f'Average inference time over episode {episode_idx}: {np.mean(inference_times):.2f} ms +/- {np.std(inference_times):.2f} ms')
-    true_actions = np.stack(true_actions_list)   # shape (n, 8)
-    pred_actions = np.stack(pred_actions_list)   # shape (n, 8)
+    true_actions = np.stack(true_actions_list)   # shape (n, 7)
+    pred_actions = np.stack(pred_actions_list)   # shape (n, 7)
     n = true_actions.shape[0]
 
 # initial load
@@ -84,7 +85,8 @@ im_scene = ax_scene.imshow(dataset[episode_start_idx]["observation.images.scene_
 ax_scene.set_title("Scene Image")
 ax_scene.axis("off")
 
-im_sophie = ax_sophie.imshow(dataset[episode_start_idx]["observation.images.wrist_image"].cpu().numpy().transpose(1, 2, 0))
+print(list(dataset[episode_start_idx].keys()))
+im_sophie = ax_sophie.imshow(dataset[episode_start_idx]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
 ax_sophie.set_title("Wrist (Sophie) Image")
 ax_sophie.axis("off")
 
@@ -157,7 +159,7 @@ def set_episode(text):
 
     # Update images to first frame of the new episode
     im_scene.set_data(dataset[episode_start_idx]["observation.images.scene_image"].cpu().numpy().transpose(1, 2, 0))
-    im_sophie.set_data(dataset[episode_start_idx]["observation.images.wrist_image"].cpu().numpy().transpose(1, 2, 0))
+    im_sophie.set_data(dataset[episode_start_idx]["observation.images.wrist_wilson_image"].cpu().numpy().transpose(1, 2, 0))
 
     # Rebuild x-data for action lines to match new n
     x = np.arange(n)

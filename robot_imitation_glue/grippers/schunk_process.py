@@ -260,7 +260,7 @@ class SchunkGripperProcess(ParallelPositionGripper):
         self._cmd_queue.put(command)
         result = self._result_queue.get(timeout=1.0)
         if result["success"]:
-            # print(f"command executed successfully: {command}, result={result}")
+            print(f"command executed successfully: {command}, result={result}")
             return result["result"]
         else:
             raise RuntimeError(f"Failed to execute command: {command}, result={result}")
@@ -324,8 +324,12 @@ class SchunkGripperProcess(ParallelPositionGripper):
         )
 
         time.sleep(0.11)
+        def termination_condition() -> bool:
+            print("waiting")
+            return True
+            return not self.is_moving()
         # Create awaitable action that checks if the gripper has reached the target position
-        return AwaitableAction(lambda: not self.is_moving())
+        return AwaitableAction(termination_condition)
 
     def servo(self, width):
         width = np.clip(width, self.gripper_specs.min_width, self.gripper_specs.max_width)

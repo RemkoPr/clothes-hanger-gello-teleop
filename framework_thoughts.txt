@@ -8,8 +8,14 @@ I'd prefer a window that must be active for the data collection control keys (pa
 
 The preprocessor should be stored along with the training data/the trained model, to avoid incongruence between data collection preprocessing and inference preprocessing
 
+Likewise: action -> robot movement function should be stored somewhere, consider e.g. the case where only 3 out of 6 degrees of freedom are used, then it is not clear from looking at model output alone what the "action" means.
+
 We should think about aliases for observation names. Descriptive keys like "observation.images.left_wrist_image" are nice because the dataset itself tells you more about which physical camera this observation belongs to, as opposed to e.g. "observation.images.wrist1_image"
 
 need reliable tooling to combine datasets and remove incomplete/"broken" episodes (the latter occurs e.g. due to crash during storing of episode)
 
 should we support both absolute as well as delta actions/observations? In which cases could the difference matter? Delta observations could be relevant for sensors (e.g. F/T)
+
+
+Raman:
+
