@@ -11,7 +11,7 @@ import rerun as rr
 from robot_imitation_glue.base import BaseAgent, BaseEnv
 from robot_imitation_glue.dataset_recorder import LeRobotDatasetRecorder
 from robot_imitation_glue.utils import precise_wait
-from robot_imitation_glue.ur5station.ur5_robot_env import convert_gello_actions_to_joint_space_robot_pose
+from robot_imitation_glue.ur5station.ur5_robot_env import UR5eStation, convert_gello_actions_to_joint_space_robot_pose
 
 converter_callable = Callable[dict[str, np.ndarray], np.ndarray]
 
@@ -98,14 +98,12 @@ def init_keyboard_listener(event: Event, state: State):
 
 
 def collect_data(  # noqa: C901
-    env: BaseEnv,
-    teleop_agent: BaseAgent,
+    env: UR5eStation,
     dataset_recorder: LeRobotDatasetRecorder,
     frequency=10,
     teleop_to_pose_converter: converter_callable = None,
     abs_pose_to_policy_action: converter_callable = None,
 ):
-    assert env.ACTION_SPEC == teleop_agent.ACTION_SPEC
 
     rr.init("robot_imitation_glue", spawn=True)
 
@@ -114,10 +112,7 @@ def collect_data(  # noqa: C901
     listener = init_keyboard_listener(event, state)
 
     control_period = 1 / frequency
-
-    target_pose = env.get_robot_pose_se3()
-    target_joint_pose = env.get_joint_configuration()
-    target_gripper_state = np.array([env.get_gripper_openings()[0]])
+    env.teleop_robot.move_to_joint_configuration(env.teleop_agent.get_action()[:6], joint_speed=0.1).wait()
 
     while not state.is_stopped:
         cycle_end_time = time.time() + control_period
@@ -159,7 +154,7 @@ def collect_data(  # noqa: C901
         elif event.resume and state.is_paused:
             state.is_paused = False
             logger.info("======================= Resume teleop, first move slowly to current teleop pose")
-            action = teleop_agent.get_action(env.get_observations())
+            action = env.teleop_agent.get_action(env.get_observations())
             logger.debug(f"Action: {action}")
             initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
                 env.get_joint_configuration(), np.array([env.get_gripper_openings()[0]]), action
@@ -218,28 +213,23 @@ def collect_data(  # noqa: C901
             time.sleep(0.1)
             continue
 
-        action = teleop_agent.get_action(observation)
+        action = env.teleop_agent.get_action()
         logger.info(f"Action: {action}")
-
-        new_robot_target_pose, new_gripper_target_width = teleop_to_pose_converter(target_pose, target_gripper_state, action)
 
         # store the actions in absolute format, to facilitate any action conversion later on.
         # observation["target_abs_robot_se3e_pose"] = new_robot_target_se3_pose
         # observation["target_abs_gripper_pose"] = new_gripper_target_width
 
-        policy_formatted_action = abs_pose_to_policy_action(
-            target_joint_pose, target_gripper_state, new_robot_target_pose, new_gripper_target_width
-        )
 
         env.act(
-            robot_pose=new_robot_target_pose,
-            gripper_pose=new_gripper_target_width,
+            robot_pose=action[:6],
+            gripper_pose=action[6],
             timestamp=time.time() + control_period,
             disable_gripper=False
         )
 
         if state.is_recording:
-            dataset_recorder.record_step(observation, policy_formatted_action)
+            dataset_recorder.record_step(observation, action.astype(np.float32))
 
         # wait for end of the control period
         if cycle_end_time > time.time():
@@ -247,9 +237,6 @@ def collect_data(  # noqa: C901
         else:
             logger.warning("cycle time exceeded control period")
 
-        # update the target pose and target gripper state for the next iteration
-        target_pose = new_robot_target_pose
-        target_gripper_state = new_gripper_target_width
 
         # TODO: we now use 'integration' to get the next target pose instead of using the current pose.
         # this is to avoid 'shaking' of the robot, as is done in diffusion policy teleop for example.
@@ -268,7 +255,7 @@ if __name__ == "__main__":
     from robot_imitation_glue.robot_env import UR3eStation
     from robot_imitation_glue.spacemouse_agent import SpaceMouseAgent
 
-    env = UR3eStation()
+    env = UR5eStation()
 
     dataset_name = "test_dataset"
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from loguru import logger
 import numpy as np
 
-from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
+from robot_imitation_glue.agents.gello import DynamixelConfig
 from robot_imitation_glue.collect_data import collect_data
 from robot_imitation_glue.dataset_recorder import LeRobotDatasetRecorder
 from robot_imitation_glue.ur5station.ur5_robot_env import (
@@ -91,22 +91,8 @@ if __name__ == "__main__":
         fps=10,
     )
 
-    input("Hold Gello arm in similar pose as teleop robot and press Enter to start collecting data")
-    agent = GelloAgent(config, GELLO_AGENT_PORT, start_joints=env.teleop_robot.get_joint_configuration())
-    action = agent.get_action(env.get_observations())
-    logger.debug(f"Action: {action}")
-    initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
-        env.get_joint_configuration(), np.array([env.get_gripper_openings()[0]]), action
-    )
-    # first move robot slowly to the current teleop pose.
-    logger.info(f"Moving to initial pose: {initial_pose}")
-    env.teleop_robot.move_to_joint_configuration(initial_pose).wait()
-
     collect_data(
         env,
-        agent,
         dataset_recorder,
-        frequency=10,
-        teleop_to_pose_converter=convert_gello_actions_to_joint_space_robot_pose,
-        abs_pose_to_policy_action=abs_joints_to_policy_action_converter,
+        frequency=10
     )

@@ -14,14 +14,15 @@ import numpy as np
 from airo_camera_toolkit.cameras.realsense.realsense import Realsense
 from airo_camera_toolkit.cameras.zed.zed import Zed
 from airo_robots.manipulators.hardware.ur_rtde import URrtde
+from airo_robots.grippers.hardware.schunk_process import SchunkGripperProcess
+from airo_teleop_agents.gello_teleop_agents import Gello4UR_ParallelGripper
+from airo_teleop_devices.gello_teleop_device import GelloTeleopDevice
 from airo_spatial_algebra.se3 import SE3Container, normalize_so3_matrix
 from ur_analytic_ik import ur5e
 from clothes_hanger import ClothesHanger, ClothesHangerMock, ClothesHangerSpoof
 from functools import partial
 
-from robot_imitation_glue.agents.gello import DynamixelConfig, GelloAgent
 from robot_imitation_glue.base import BaseEnv
-from robot_imitation_glue.grippers.schunk_process import SchunkGripperProcess
 from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscriber
 
 # env consists of 1 zed scene camera, 1 wrist  realsense cameras and a UR5e robot + Schunk gripper
@@ -168,11 +169,19 @@ class UR5eStation(BaseEnv):
         sophie_awaitable.wait()
         self.wilson_base_pose = self.wilson.get_tcp_pose()
 
+        input("Press Enter to read clothes hanger values in home pose")
         init_vals = self.clothes_hanger.read()
         self.clothes_hanger.init_offsets(init_vals)  # Set initial offsets. TODO: make offset depend on training dataset
         #self.clothes_hanger.init_thesholds()
         logger.warning(f"Using clothes hanger baseline: {self.clothes_hanger.baseline}, thresholds: {self.clothes_hanger.thresholds}, offsets: {self.clothes_hanger.offsets}")
-        
+
+        self.teleop_agent = Gello4UR_ParallelGripper(
+                    gello_usb_port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5-if00-port0",
+                    gello_config=GelloTeleopDevice.GELLO1_DEFAULT_CONFIG,
+                    ur_robot=self.teleop_robot,
+                    gripper=self.gripper_teleop,
+                    use_joint_space=True)
+
         if INIT_GRASPS:
             input("Grasp shirt?")
             self.gripper_hold.move(0.0, speed=2*self.gripper_hold.gripper_specs.min_speed, force=self.gripper_hold.gripper_specs.max_force).wait()
