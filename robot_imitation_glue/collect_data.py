@@ -8,7 +8,8 @@ import loguru
 import numpy as np
 import rerun as rr
 
-from robot_imitation_glue.base import BaseAgent, BaseDatasetRecorder, BaseEnv
+from robot_imitation_glue.base import BaseAgent, BaseEnv
+from robot_imitation_glue.dataset_recorder import LeRobotDatasetRecorder
 from robot_imitation_glue.utils import precise_wait
 from robot_imitation_glue.ur5station.ur5_robot_env import convert_gello_actions_to_joint_space_robot_pose
 
@@ -99,7 +100,7 @@ def init_keyboard_listener(event: Event, state: State):
 def collect_data(  # noqa: C901
     env: BaseEnv,
     teleop_agent: BaseAgent,
-    dataset_recorder: BaseDatasetRecorder,
+    dataset_recorder: LeRobotDatasetRecorder,
     frequency=10,
     teleop_to_pose_converter: converter_callable = None,
     abs_pose_to_policy_action: converter_callable = None,
@@ -138,7 +139,7 @@ def collect_data(  # noqa: C901
             state.is_recording = False
             # save episode
             dataset_recorder.save_episode()
-            # TODO: allow for textual description of the episode?
+            dataset_recorder.finish_recording()  # TODO: see if this is necessary here and if i have to restart recording somewhere
             state.is_paused = True
 
         elif state.is_recording and event.cancel_recording:

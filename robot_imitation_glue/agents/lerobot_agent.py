@@ -4,14 +4,46 @@ import numpy as np
 import torch
 from loguru import logger
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.policies.diffusion.configuration_diffusion import PreTrainedConfig
-from lerobot.common.policies.factory import make_policy
+from src.lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from src.lerobot.policies.diffusion.configuration_diffusion import PreTrainedConfig
+from src.lerobot.policies.factory import make_policy, make_pre_post_processors
 from robot_imitation_glue.base import BaseAgent
 
 
+def make_lerobot_policy_for_inference(pretrained_path, device="cuda"):
+    """
+    Loads a policy and its processors for inference without requiring the original dataset.
+    """
+    # 1. Load the policy configuration to ensure we have the right type (optional if you know it's Diffusion)
+    # config_path = Path(pretrained_path) / "config.json"
+    # with open(config_path, "r") as f:
+    #     cfg_dict = json.load(f)
+    
+    # 2. Load the Policy Weights directly
+    # This automatically loads the config and weights.
+    # Note: Replace DiffusionPolicy with the class matching your model (ACTPolicy, etc.)
+    policy = DiffusionPolicy.from_pretrained(pretrained_path)
+    policy.eval()
+    policy.to(device)
+
+    # 3. Load the Pre/Post Processors
+    # passing pretrained_path allows it to load policy_preprocessor.json and .safetensors stats
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy.config, 
+        pretrained_path=pretrained_path
+    )
+    
+    # # Move processors to device
+    # if preprocessor:
+    #     preprocessor.to(device)
+    # if postprocessor:
+    #     postprocessor.to(device)
+
+    return policy, preprocessor, postprocessor
+
+"""
 def make_lerobot_policy(pretrained_path, dataset_path):
-    """ """
+     
     # TODO: try to omit the need to load the dataset, bc it is not always on the same machine and is a source of errors..
     # not sure why Lerobot has not simply stored the metadata in an additional file.
     policy_config = PreTrainedConfig.from_pretrained(pretrained_path)
@@ -22,7 +54,7 @@ def make_lerobot_policy(pretrained_path, dataset_path):
     policy = make_policy(policy_config, ds_meta=dataset.meta)
     policy.eval()
     return policy
-
+"""
 
 class LerobotAgent(BaseAgent):
     """
@@ -30,7 +62,7 @@ class LerobotAgent(BaseAgent):
 
     """
 
-    def __init__(self, policy, device, observation_preprocessor):
+    def __init__(self, policy, preprocessor, postprocessor, device, observation_preprocessor):
         """
         processor must take the env obs dict and do
         1) numpy to tensor
@@ -42,6 +74,8 @@ class LerobotAgent(BaseAgent):
         """
         super().__init__()
         self.policy = policy
+        self.preprocessor = preprocessor
+        self.postprocessor = postprocessor
         self.device = device
         self.observation_preprocessor = observation_preprocessor
 
@@ -53,7 +87,9 @@ class LerobotAgent(BaseAgent):
         observation = {k: v.to(self.device) for k, v in observation.items()}
         with torch.no_grad():
             time_start = time.time()
+            observation = self.preprocessor(observation)
             action = self.policy.select_action(observation)
+            action = self.postprocessor(action)
             time_end = time.time()
             logger.info(f"Lerobot agent inference took {((time_end - time_start)*1000):.2f} ms")
         return action.squeeze(0).cpu().numpy()

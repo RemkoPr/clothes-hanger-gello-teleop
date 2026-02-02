@@ -149,7 +149,7 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
         self._n_recorded_episodes += 1
 
     def finish_recording(self):
-        pass
+        self.lerobot_dataset.finalize()
 
     @property
     def n_recorded_episodes(self):

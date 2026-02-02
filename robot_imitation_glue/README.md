@@ -1,6 +1,11 @@
 ## Data collection:
 run robot_imitation_glue/robot_imitation_glue/ur5station/data_collection.py
 
+## Upload dataset to HF
+hf auth login --token [token] --add-to-git-credential  % for token see jupyterhub script start_diffusion_training.sh
+hf upload RemkoPr/test_dataset ./clothes-hanger-v3p7-w500h720-2cam-n50 --repo-type=dataset
+
+
 ## Dataset visualisation:
 
 python lerobot/lerobot/scripts/visualize_dataset_html.py   --root datasets/2025-04-29_15-40-01/ --force-override 1 --repo-id test/test
@@ -29,6 +34,9 @@ model size parameters in config: "down_dims", "kernel_size", "diffusion_step_emb
 screen -S session_name -> starts session
 ctrl+a ctrl+d -> detaches session
 screen -Rd session_name -> reattaches session
+
+## Downloading HF model
+hf download RemkoPr/test_dataset_model --local-dir "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train"
 
 ## Evaluation
 
