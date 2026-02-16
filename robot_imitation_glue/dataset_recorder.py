@@ -4,7 +4,7 @@ from loguru import logger
 import numpy as np
 import torch
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robot_imitation_glue.base import BaseDatasetRecorder
 
 
@@ -105,7 +105,7 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
             print(f"Dataset {dataset_name} already exists. Loading it.")
             self.lerobot_dataset = LeRobotDataset(repo_id=dataset_name, root=self.root_dataset_dir)
             self.lerobot_dataset.start_image_writer(num_processes=0, num_threads=16)
-            self._n_recorded_episodes = len(self.lerobot_dataset.episode_data_index["from"])
+            self._n_recorded_episodes = self.lerobot_dataset.meta.total_episodes
             print(f"Loaded {self._n_recorded_episodes} episodes.")
         else:
             print(f"Dataset {dataset_name} does not exist. Creating it.")
@@ -141,7 +141,11 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
 
     def clear_episode(self):
         # Clear the current episode data
-        self.lerobot_dataset.clear_episode_buffer()
+        if self.lerobot_dataset.episode_buffer is not None:
+            logger.info("Clearing episode buffer")
+            self.lerobot_dataset.clear_episode_buffer()
+        else:
+            logger.warning("No episode buffer to clear")
 
     def save_episode(self):
         # TODO add frames here to dataset
@@ -150,6 +154,21 @@ class LeRobotDatasetRecorder(BaseDatasetRecorder):
 
     def finish_recording(self):
         self.lerobot_dataset.finalize()
+
+    def reinitialize_dataset(self):
+        """Finalize the dataset (flush parquet writers) and re-open it so that
+        subsequent episodes don't overwrite existing data files.
+
+        Safe to call after every ``save_episode()`` for crash resilience.
+        """
+        # Re-open the dataset so the next save_episode() starts a new parquet
+        # file instead of truncating the one that was just finalized.
+        self.lerobot_dataset = LeRobotDataset(
+            repo_id=self.dataset_name,
+            root=self.root_dataset_dir,
+        )
+        self.lerobot_dataset.start_image_writer(num_processes=0, num_threads=16)
+        self._n_recorded_episodes = self.lerobot_dataset.meta.total_episodes
 
     @property
     def n_recorded_episodes(self):
@@ -187,10 +206,11 @@ if __name__ == "__main__":
         for i in range(10 - j):
             dataset_recorder.record_step(example_obs, example_action)
         dataset_recorder.save_episode()
+        dataset_recorder.finish_recording()  # finalize after each episode (like collect_data.py)
+        print(f"After episode {j}: recorded {dataset_recorder.n_recorded_episodes} episodes.")
 
-    dataset_recorder.finish_recording()
-    print(f"Recorded {dataset_recorder.n_recorded_episodes} episodes.")
+    print(f"\nTotal recorded: {dataset_recorder.n_recorded_episodes} episodes.")
 
     dataset = LeRobotDataset(repo_id="test_dataset", root=Path("datasets"), episodes=[0, 1])
     print(f"Loaded {len(dataset)} steps.")
-    print(dataset.episode_data_index)
+    print(f"Episodes in dataset: {dataset.episodes}")

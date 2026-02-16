@@ -118,6 +118,11 @@ class RGBCameraSubscriber(RGBCamera):
     def get_timestamp(self) -> float:
         """Get the timestamp of the current image."""
         return self._timestamp
+    
+    @property
+    def fps(self) -> float:
+        """The frames per second of the camera."""
+        raise NotImplementedError
 
     def _grab_images(self) -> None:
         frame = self._reader_rgb()

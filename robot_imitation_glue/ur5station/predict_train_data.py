@@ -1,5 +1,5 @@
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from robot_imitation_glue.agents.lerobot_agent import LerobotAgent, make_lerobot_policy
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from robot_imitation_glue.agents.lerobot_agent import LerobotAgent, make_lerobot_policy_for_inference
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, TextBox
 from loguru import logger
@@ -25,13 +25,13 @@ class EpisodeViewer:
             self.state_key_prefix = ""
         else:
             raise ValueError(f"Unknown dataset_type: {dataset_type}")
-        self.episode_indices = self.dataset.episode_data_index
+        self.episode_indices = self.dataset.meta.episodes
         logger.debug(f"episode_indices = {self.episode_indices}")
 
         # Load policy
-        policy = make_lerobot_policy(checkpoint_path, train_dataset_path)
-        self.lerobot_agent = LerobotAgent(policy, "cuda", lambda obs: self.preprocessor(obs, sophie_cam=self.sophie_cam))
-
+        policy, preprocessor, postprocessor = make_lerobot_policy_for_inference(checkpoint_path)
+        self.lerobot_agent = LerobotAgent(policy,preprocessor, postprocessor, "cuda", lambda x: x)
+ 
         # State
         self.episode_idx = 0
         self.action_idx = 0
@@ -80,8 +80,8 @@ class EpisodeViewer:
     def load_episode(self, idx):
         """Load episode idx and compute true_actions & pred_actions arrays."""
         self.episode_idx = idx
-        self.episode_start_idx = self.episode_indices["from"][idx].item()
-        self.episode_to_idx = self.episode_indices["to"][idx].item()
+        self.episode_start_idx = self.episode_indices["dataset_from_index"][idx]
+        self.episode_to_idx = self.episode_indices["dataset_to_index"][idx]
 
         true_actions_list = []
         pred_actions_list = []
@@ -190,7 +190,7 @@ class EpisodeViewer:
             logger.warning("Invalid episode index entered (not an int).")
             return
 
-        if not (0 <= new_ep < len(self.episode_indices["from"])):
+        if not (0 <= new_ep < len(self.episode_indices["dataset_from_index"])):
             logger.warning("Episode index out of range.")
             return
 
@@ -232,30 +232,16 @@ class EpisodeViewer:
 if __name__ == "__main__":
     # Dataset to inference
     #root_dir = "datasets/clothes-hanger-v3p3-w426h480"
-    #root_dir = "datasets/clothes-hanger-v3-test-w426h480"
-    #root_dir = "datasets/clothes-hanger-v3p5-w500h720-2cam"
-    #root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
 
-    #dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
-    #dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n50"
-    #dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-2cam-n50-EVAL"
-    dataset_to_inference_root_dir = "datasets/clothes-hanger-v3p7-2cam-visionOnly-n100-EVAL"
+    dataset_to_inference_root_dir = "datasets/2clothes2hanger-bch-lbts-PREPR"
     
-    repo_id = "clothes-hanger-repo-v3-test"
+    repo_id = "repo_id"
     # Model
-    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-n50"
-    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-18/18-41-35_clothes-hanger-v3.7-2cam-n50/checkpoints/100000/pretrained_model"
 
-    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n50"
-    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-20/16-19-05_clothes-hanger-v3.7-2cam-visionOnly-n50/checkpoints/100000/pretrained_model"
+    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/2clothes2hanger-bch-lbts-PREPR"
+    model_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2026-02-11"
     
-    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-visionOnly-n100"
-    checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-21/19-26-01_clothes-hanger-v3.7-2cam-visionOnly-n100/checkpoints/100000/pretrained_model"
-    
-    #train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/clothes-hanger-v3p7-w500h720-2cam-n100"
-    #checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2025-08-19/13-08-59_clothes-hanger-v3.7-2cam-n100/checkpoints/100000/pretrained_model"
-
-    viewer = EpisodeViewer(dataset_to_inference_root_dir, repo_id, checkpoint_path, train_dataset_path, dataset_type="EVAL", model_type="VIZ", sophie_cam=False)
+    viewer = EpisodeViewer(dataset_to_inference_root_dir, repo_id, model_checkpoint_path, train_dataset_path, dataset_type="TRAIN", model_type="INSTR", sophie_cam=False)
     viewer.load_episode(3)
     viewer.init_plot()
     viewer.show()

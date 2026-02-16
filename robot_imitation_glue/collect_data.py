@@ -12,6 +12,7 @@ from robot_imitation_glue.base import BaseAgent, BaseEnv
 from robot_imitation_glue.dataset_recorder import LeRobotDatasetRecorder
 from robot_imitation_glue.utils import precise_wait
 from robot_imitation_glue.ur5station.ur5_robot_env import UR5eStation, convert_gello_actions_to_joint_space_robot_pose
+from robot_imitation_glue.ur5station.shirt_initialiser import ShirtInitialiser
 
 converter_callable = Callable[dict[str, np.ndarray], np.ndarray]
 
@@ -19,12 +20,14 @@ logger = loguru.logger
 
 
 class State:
+    initialising = False
     is_recording = False
     is_stopped = False
     is_paused = False
 
 
 class Event:
+    start_init = False
     start_recording = False
     stop_recording = False
     delete_last = False
@@ -54,7 +57,10 @@ def init_keyboard_listener(event: Event, state: State):
             #if hasattr(key, "char"):
             #    print(f"Key pressed: {key.char}")
             # "space bar"
-            if key == keyboard.Key.enter and not state.is_recording:
+            if key == keyboard.Key.enter and not state.initialising and not state.is_recording:
+                event.start_init = True
+
+            elif key == keyboard.Key.enter and state.initialising and not state.is_recording:
                 event.start_recording = True
 
             elif key == keyboard.Key.enter and state.is_recording:
@@ -105,143 +111,183 @@ def collect_data(  # noqa: C901
     abs_pose_to_policy_action: converter_callable = None,
 ):
 
-    rr.init("robot_imitation_glue", spawn=True)
+    # rr.init("robot_imitation_glue", spawn=True)  # if port 9876 is free. else, run in terminal `rerun viewer --port 9877` and uncomment next two lines    rr.spawn(port=9877)
+    
+    #rr.init("robot_imitation_glue", spawn=False)
+    #rr.connect_grpc("rerun+http://127.0.0.1:9877/proxy")
+
+    rr.init("robot_imitation_glue2")
+    rr.spawn(port=9875, memory_limit="20%", connect=True)
 
     state = State()
     event = Event()
     listener = init_keyboard_listener(event, state)
+    shirt_initialiser = ShirtInitialiser()
 
-    control_period = 1 / frequency
+    # move robot to initial teleop pose
     env.teleop_robot.move_to_joint_configuration(env.teleop_agent.get_action()[:6], joint_speed=0.1).wait()
 
+    control_period = 1 / frequency
     while not state.is_stopped:
-        cycle_end_time = time.time() + control_period
+        try:
+            cycle_end_time = time.time() + control_period
 
-        before_observation_time = time.time()
-        observation = env.get_observations()
-        after_observation_time = time.time()
-        after_observation_time - before_observation_time
-        # print("observation time: ", observation_time)
+            #before_observation_time = time.time()
+            #observation = env.get_observations()
+            #after_observation_time = time.time()
+            #observation_time = after_observation_time - before_observation_time
+            #print("observation time: ", observation_time)
 
-        # update & handle state machine events
-        if not state.is_recording and event.start_recording:
-            logger.info("======================= Start recording")
-            state.is_recording = True
-            dataset_recorder.start_episode()
+            # update & handle state machine events
+            if not state.initialising and event.start_init:
+                logger.info("======================= Initialising demo")
+                state.initialising = True
+                env.move_hold_robot_random_translation()
+                shirt_initialiser.init_random_line()
+                env.move_teleop_robot_to_home_pose(joint_speed=0.2)
+                observation = env.get_observations()
+                dataset_recorder.start_episode()
+                dataset_recorder.record_step(observation, np.array([0]*7).astype(np.float32))
+                if not state.is_paused:
+                    env.teleop_robot.move_to_joint_configuration(env.teleop_agent.get_action()[:6], joint_speed=0.2).wait()
 
-        elif state.is_recording and event.stop_recording:
-            logger.info("======================= Stop recording")
-            state.is_recording = False
-            # save episode
-            dataset_recorder.save_episode()
-            dataset_recorder.finish_recording()  # TODO: see if this is necessary here and if i have to restart recording somewhere
-            state.is_paused = True
+            elif state.initialising and not state.is_recording and event.start_recording:
+                logger.info("======================= Start recording (start_recording event received and already got ch baseline)")
+                state.is_recording = True
+                state.initialising = False
+                if state.is_paused:
+                    env.teleop_robot.move_to_joint_configuration(env.teleop_agent.get_action()[:6], joint_speed=0.2).wait()
+                state.is_paused = False
 
-        elif state.is_recording and event.cancel_recording:
-            logger.info("======================= Cancel and stop recording")
-            state.is_recording = False
+            elif state.is_recording and event.stop_recording:
+                logger.info("======================= Stop recording")
+                state.is_recording = False
+                # save episode
+                dataset_recorder.save_episode()
+                dataset_recorder.finish_recording()
+                dataset_recorder.reinitialize_dataset()
+                
+                state.is_paused = True
+
+            elif (state.is_recording or state.initialising) and event.cancel_recording:
+                logger.info("======================= Cancel and stop recording")
+                state.is_recording = False
+                state.initialising = False
+                time.sleep(0.5)  # avoid erasing images that are currently being written
+                dataset_recorder.clear_episode()
+
+            elif event.delete_last and not state.is_recording:
+                logger.info("======================= Delete last episode")
+                raise NotImplementedError("delete last episode not implemented")
+
+            elif event.pause and not state.is_recording:
+                state.is_paused = True
+                logger.info("======================= Pause teleop")
+
+            elif event.resume and state.is_paused:
+                state.is_paused = False
+                logger.info("======================= Resume teleop, first move slowly to current teleop pose")
+                action = env.teleop_agent.get_action()
+                logger.debug(f"Action: {action}")
+                env.teleop_robot.move_to_joint_configuration(action[:6]).wait()
+                logger.info("======================= Resuming teleop.")
+
+            elif event.do_toggle_gripper and state.is_paused:
+                logger.info("======================= Toggling gripper")
+                env.toggle_holding_gripper()
+
+            elif event.do_randomise_hold_pose and state.is_paused:
+                logger.info("======================= Randomising T-shirt hold pose")
+                env.move_hold_robot_random_translation()
+
+            elif event.do_reset and state.is_paused:
+                logger.info("======================= Resetting robot to initial pose")
+                # move robot to initial pose
+                env.move_teleop_robot_to_home_pose(joint_speed=0.2)
+
+            elif event.quit:
+                logger.info("Quitting...")
+                state.is_stopped = True
+                state.initialising = False
+                state.is_recording = False
+                listener.stop()
+                time.sleep(0.5)  # avoid erasing images that are currently being written
+                dataset_recorder.clear_episode()  # if quit during recording, clear unfinished episode
+                dataset_recorder.finish_recording()
+                logger.info("Finished dataset recording and quit data collection.")
+                return
+
+            # clear all events
+            event.clear()
+
+            observation = env.get_observations()
+            # update GUI.
+            vis_img = observation["scene_image"].copy()
+            wrist_img = observation["wrist_wilson_image"].copy()
+
+            if state.initialising:
+                shirt_initialiser.annotate_image(wrist_img)
+                cv2.putText(vis_img, "INTIALISING", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 255, 0), 2)
+            if state.is_recording:
+                cv2.putText(vis_img, "RECORDING", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            if state.is_paused:
+                cv2.putText(vis_img, "PAUSED", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+            cv2.putText(
+                vis_img,
+                f" # episodes: {dataset_recorder.n_recorded_episodes}",
+                (10, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                2,
+            )
+            rr.log("image", rr.Image(vis_img, rr.ColorModel.RGB))
+            #rr.log("wrist_sophie_image", rr.Image(observation["wrist_sophie_image"], rr.ColorModel.RGB))
+            rr.log("Init instruction", rr.Image(wrist_img, rr.ColorModel.RGB))
+            rr.log("obs: wrist_wilson_image", rr.Image(observation["wrist_wilson_image"], rr.ColorModel.RGB))
+            rr.log("obs: scene_image", rr.Image(observation["scene_image"], rr.ColorModel.RGB))
+
+            # if paused, do not collect teleop or execute action
+            if state.is_paused:
+                time.sleep(0.1)
+                continue
+
+            action = env.teleop_agent.get_action()
+            logger.info(f"Action: {action}")
+
+            # store the actions in absolute format, to facilitate any action conversion later on.
+            # observation["target_abs_robot_se3e_pose"] = new_robot_target_se3_pose
+            # observation["target_abs_gripper_pose"] = new_gripper_target_width
+
+            env.act(
+                robot_pose=action[:6],
+                gripper_pose=action[6],
+                timestamp=time.time() + control_period,
+                disable_gripper=False
+            )
+
+            if state.is_recording:
+                dataset_recorder.record_step(observation, action.astype(np.float32))
+
+            # wait for end of the control period
+            if cycle_end_time > time.time():
+                precise_wait(cycle_end_time)
+            else:
+                logger.warning("cycle time exceeded control period")
+
+
+            # TODO: we now use 'integration' to get the next target pose instead of using the current pose.
+            # this is to avoid 'shaking' of the robot, as is done in diffusion policy teleop for example.
+            # but need to verify that this does not cause mismatch between teleop and policy.
+            # and should also check if the distance between the target and the actual robot does not diverge too much.
+        except (KeyboardInterrupt, Exception) as e:
+            logger.error(f"An error occurred, clearing current episode and finishing recording. \nOriginal error: {e}")
+            listener.stop()
             time.sleep(0.5)  # avoid erasing images that are currently being written
             dataset_recorder.clear_episode()
-
-        elif event.delete_last and not state.is_recording:
-            logger.info("======================= Delete last episode")
-            raise NotImplementedError("delete last episode not implemented")
-
-        elif event.pause and not state.is_recording:
-            state.is_paused = True
-            logger.info("======================= Pause teleop")
-
-        elif event.resume and state.is_paused:
-            state.is_paused = False
-            logger.info("======================= Resume teleop, first move slowly to current teleop pose")
-            action = env.teleop_agent.get_action(env.get_observations())
-            logger.debug(f"Action: {action}")
-            initial_pose, gripper = convert_gello_actions_to_joint_space_robot_pose(
-                env.get_joint_configuration(), np.array([env.get_gripper_openings()[0]]), action
-            )
-            logger.info(f"Moving to current teleop pose: {initial_pose}")
-            env.teleop_robot.move_to_joint_configuration(initial_pose).wait()
-            logger.info("======================= Resuming teleop.")
-
-        elif event.do_toggle_gripper and state.is_paused:
-            logger.info("======================= Toggling gripper")
-            env.toggle_holding_gripper()
-
-        elif event.do_randomise_hold_pose and state.is_paused:
-            logger.info("======================= Randomising T-shirt hold pose")
-            env.move_hold_robot_random_translation()
-
-        elif event.do_reset and state.is_paused:
-            logger.info("======================= Resetting robot to initial pose")
-            # move robot to initial pose
-            env.move_teleop_robot_to_home_pose()
-
-        elif event.quit:
-            logger.info("quit")
-            state.is_stopped = True
-            listener.stop()
             dataset_recorder.finish_recording()
+            logger.info("Finished dataset recording and quit data collection.")
             return
-
-        # clear all events
-        event.clear()
-
-        # update GUI.
-        vis_img = observation["scene_image"].copy()
-
-        # visualize state is_recording, is_paused
-        if state.is_recording:
-            cv2.putText(vis_img, "RECORDING", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-        if state.is_paused:
-            cv2.putText(vis_img, "PAUSED", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
-        cv2.putText(
-            vis_img,
-            f" # episodes: {dataset_recorder.n_recorded_episodes}",
-            (10, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 255, 255),
-            2,
-        )
-        rr.log("image", rr.Image(vis_img, rr.ColorModel.RGB))
-        rr.log("wrist_sophie_image", rr.Image(observation["wrist_sophie_image"], rr.ColorModel.RGB))
-        rr.log("wrist_wilson_image", rr.Image(observation["wrist_wilson_image"], rr.ColorModel.RGB))
-        rr.log("scene_image", rr.Image(observation["scene_image"], rr.ColorModel.RGB))
-
-        # if paused, do not collect teleop or execute action
-        if state.is_paused:
-            time.sleep(0.1)
-            continue
-
-        action = env.teleop_agent.get_action()
-        logger.info(f"Action: {action}")
-
-        # store the actions in absolute format, to facilitate any action conversion later on.
-        # observation["target_abs_robot_se3e_pose"] = new_robot_target_se3_pose
-        # observation["target_abs_gripper_pose"] = new_gripper_target_width
-
-
-        env.act(
-            robot_pose=action[:6],
-            gripper_pose=action[6],
-            timestamp=time.time() + control_period,
-            disable_gripper=False
-        )
-
-        if state.is_recording:
-            dataset_recorder.record_step(observation, action.astype(np.float32))
-
-        # wait for end of the control period
-        if cycle_end_time > time.time():
-            precise_wait(cycle_end_time)
-        else:
-            logger.warning("cycle time exceeded control period")
-
-
-        # TODO: we now use 'integration' to get the next target pose instead of using the current pose.
-        # this is to avoid 'shaking' of the robot, as is done in diffusion policy teleop for example.
-        # but need to verify that this does not cause mismatch between teleop and policy.
-        # and should also check if the distance between the target and the actual robot does not diverge too much.
 
 
 if __name__ == "__main__":

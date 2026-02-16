@@ -5,9 +5,7 @@ Actions as absolute target pose (rotation vector) in robot base frame and absolu
 Proprioception as robot pose (euler angles) in robot base frame and gripper width
 """
 
-import os
 import time
-
 import cv2
 import loguru
 import numpy as np
@@ -24,6 +22,7 @@ from functools import partial
 
 from robot_imitation_glue.base import BaseEnv
 from robot_imitation_glue.ipc_camera import RGBCameraPublisher, RGBCameraSubscriber
+
 
 # env consists of 1 zed scene camera, 1 wrist  realsense cameras and a UR5e robot + Schunk gripper
 
@@ -44,11 +43,13 @@ SCENE_CAM_RESOLUTION_TOPIC = "scene_resolution"
 WILSON_IP = "10.42.0.163"
 SOPHIE_IP = "10.42.0.162"
 SCHUNK_TCP_OFFSET = 0.184
-CLOTHES_HANGER_GRASP_WIDTH = 0.02
+ORIGINAL_CLOTHES_HANGER_GRASP_WIDTH = 0.02
+BCH_GRASP_WIDTH = 0.0055
+CLOTHES_HANGER_GRASP_WIDTH = BCH_GRASP_WIDTH
 INIT_GRASPS = False
 
-SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:5:1.0-port0,11,115200,8E1"
-SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0,14,115200,8E1"
+SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0,11,115200,8E1"
+SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:13.3:1.0-port0,12,115200,8E1"
 
 HOLD_SHIRT_JOINTS_WILSON_HORIZONTAL = np.array([160, -130, 84, 44, 94, 87]) * np.pi / 180
 HOLD_SHIRT_JOINTS_WILSON_VERTICAL = np.array([157, -92, 29, -24, -91, 83]) * np.pi / 180
@@ -63,11 +64,11 @@ MAX_JOINT_DELTA = 10 * np.pi / 180
 
 class CameraFactory:
     def create_wrist_camera(serial_number):
-        return Realsense(resolution=Realsense.RESOLUTION_720, fps=30, serial_number=serial_number)
+        return Realsense(resolution=Realsense.RESOLUTION_720, fps=30, serial_number=serial_number, enable_depth=False, enable_pointcloud=False)
 
     def create_scene_camera():
         return Zed(
-            resolution=Zed.RESOLUTION_720, fps=30, depth_mode=Zed.NONE_DEPTH_MODE, serial_number=SCENE_ZED_SERIAL
+            resolution=Zed.InitParams.RESOLUTION_720, fps=30, depth_mode=Zed.InitParams.NONE_DEPTH_MODE, serial_number=int(SCENE_ZED_SERIAL)
         )
 
 
@@ -81,6 +82,7 @@ class UR5eStation(BaseEnv):
         # set up robot and gripper
         # logger.info("connecting to gripper.")
 
+        self.init_time = time.time()
         # set environment variable for bks gripper comm
         #os.environ["BKS_HOST"] = SCHUNK_WILSON_PORT
         self.gripper_wilson = SchunkGripperProcess(SCHUNK_WILSON_PORT)
@@ -100,19 +102,21 @@ class UR5eStation(BaseEnv):
         self.gripper_teleop = self.gripper_sophie
         self.gripper_hold = self.gripper_wilson
 
-        ch_baseline = np.array([227, 239, 217, 211])
-        self.clothes_hanger = ClothesHanger(baseline=ch_baseline)  # >TODO: automatically derive baseline from train set
+        #ch_baseline = np.array([227, 239, 217, 211])
+        self.clothes_hanger = ClothesHanger()  # >TODO: automatically derive baseline from train set
+        if isinstance(self.clothes_hanger, ClothesHangerMock):
+            logger.warning("!!! Using ClothesHangerMock, no real clothes hanger readings will be available !!!")
         self.clothes_hanger.read()  # Test if clothes hanger can be read to catch errors early
-        self.clothes_hanger_spoof = ClothesHangerSpoof(baseline=ch_baseline, concat_type="WIDTH")
-
+        self.clothes_hanger_spoof = None#ClothesHangerSpoof(baseline=ch_baseline, concat_type="WIDTH")
+        
         if INIT_GRASPS:
             self.wilson.gripper.open()
             self.sophie.gripper.open()
         wilson_awaitable = self.wilson.move_to_joint_configuration(
-            HOLD_SHIRT_JOINTS_WILSON_VERTICAL
+            HOLD_SHIRT_JOINTS_WILSON_VERTICAL, joint_speed=0.1
         )
         sophie_awaitable = self.sophie.move_to_joint_configuration(
-            HOME_JOINTS_SOPHIE
+            HOME_JOINTS_SOPHIE, joint_speed=0.1
         )  # do not wait, let cameras initialize first'''
 
         if INCLUDE_WRIST_WILSON:
@@ -169,11 +173,10 @@ class UR5eStation(BaseEnv):
         sophie_awaitable.wait()
         self.wilson_base_pose = self.wilson.get_tcp_pose()
 
-        input("Press Enter to read clothes hanger values in home pose")
-        init_vals = self.clothes_hanger.read()
-        self.clothes_hanger.init_offsets(init_vals)  # Set initial offsets. TODO: make offset depend on training dataset
+        #init_vals = self.clothes_hanger.read()
+        #self.clothes_hanger.init_offsets(init_vals)  # Set initial offsets. TODO: make offset depend on training dataset
         #self.clothes_hanger.init_thesholds()
-        logger.warning(f"Using clothes hanger baseline: {self.clothes_hanger.baseline}, thresholds: {self.clothes_hanger.thresholds}, offsets: {self.clothes_hanger.offsets}")
+        #logger.warning(f"Using clothes hanger baseline: {self.clothes_hanger.baseline}, thresholds: {self.clothes_hanger.thresholds}, offsets: {self.clothes_hanger.offsets}")
 
         self.teleop_agent = Gello4UR_ParallelGripper(
                     gello_usb_port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5-if00-port0",
@@ -210,8 +213,8 @@ class UR5eStation(BaseEnv):
     def move_teleop_robot_to_joint_pose(self, joint_config):
         self.teleop_robot.move_to_joint_configuration(joint_config).wait()
 
-    def move_teleop_robot_to_home_pose(self):
-        self.teleop_robot.move_to_joint_configuration(HOME_JOINTS_SOPHIE).wait()
+    def move_teleop_robot_to_home_pose(self, joint_speed=0.1):
+        self.teleop_robot.move_to_joint_configuration(HOME_JOINTS_SOPHIE, joint_speed=joint_speed).wait()
 
     def move_gripper(self, width):
         self.gripper_teleop.move(width).wait()
@@ -252,25 +255,22 @@ class UR5eStation(BaseEnv):
         state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)  # not directly used, state is instead formed in ur5station/prepare_datasets
 
         obs_dict = {
-            "wrist_wilson_image_original": wrist_wilson_image,
-            "wrist_wilson_image": wrist_wilson_image_resized,
-            "wrist_sophie_image_original": wrist_sophie_image,
-            "wrist_sophie_image": wrist_sophie_image_resized,
-            "scene_image_original": scene_image,
-            "scene_image": scene_image_resized,
+            "wrist_wilson_image": wrist_wilson_image,
+            #"wrist_wilson_image": wrist_wilson_image_resized,
+            #"wrist_sophie_image_original": wrist_sophie_image,
+            #"wrist_sophie_image": wrist_sophie_image_resized,
+            "scene_image": scene_image,
+            #"scene_image": scene_image_resized,
             "state": state,
             "robot_pose": robot_state,
             "gripper_states": gripper_states,
             "joints": joints,
             "clothes_hanger": clothes_hanger_values,
             "clothes_hanger_spoof": clothes_hanger_spoof_values,
+            "actual_timestamp": np.array([time.time() - self.init_time]).astype(np.float32),
         }
 
         logger.info(f"get_observations time: {time.time() - start_time}")
-
-        # add to rerun
-        # rr.log("wrist",rr.Image(wrist_image))
-        # rr.log("scene",rr.Image(scene_image))
 
         return obs_dict
 

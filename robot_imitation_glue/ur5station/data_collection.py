@@ -4,14 +4,9 @@ from pathlib import Path
 from loguru import logger
 import numpy as np
 
-from robot_imitation_glue.agents.gello import DynamixelConfig
 from robot_imitation_glue.collect_data import collect_data
 from robot_imitation_glue.dataset_recorder import LeRobotDatasetRecorder
-from robot_imitation_glue.ur5station.ur5_robot_env import (
-    GELLO_AGENT_PORT,
-    UR5eStation,
-    convert_gello_actions_to_joint_space_robot_pose,
-)
+from robot_imitation_glue.ur5station.ur5_robot_env import UR5eStation
 
 
 def abs_se3_to_policy_action_converter(robot_pose, gripper_pose, abs_se3_action, gripper_action):
@@ -71,17 +66,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--sync", action="store_true")
     #parser.add_argument("--dataset_name", type=str, default=f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}")
-    parser.add_argument("--dataset_name", type=str, default=f"clothes-hanger-v3-test-raw")
+    parser.add_argument("--dataset_name", type=str, default=f"a")
     args = parser.parse_args()
 
     env = UR5eStation()
-
-    config = DynamixelConfig(
-        joint_ids=[1, 2, 3, 4, 5, 6],
-        joint_offsets=(np.array([40, 16, 25, 40, 15, 7]) * np.pi / 16).tolist(),
-        joint_signs=[1, 1, -1, 1, 1, 1],
-        gripper_config=(7, 194, 152),
-    )
 
     dataset_recorder = LeRobotDatasetRecorder(
         example_obs_dict=env.get_observations(),

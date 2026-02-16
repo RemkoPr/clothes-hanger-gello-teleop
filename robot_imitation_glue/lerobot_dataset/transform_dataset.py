@@ -2,9 +2,10 @@ import os
 import shutil
 from typing import Callable, Dict, Optional
 
+import numpy as np
 import tqdm
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
 def transform_dataset(  # noqa: C901
@@ -16,6 +17,7 @@ def transform_dataset(  # noqa: C901
     transform_features_fn: Optional[Callable[[Dict], Dict]] = None,
     features_to_drop: Optional[list] = None,
     episodes_to_drop: Optional[list] = None,
+    frames_to_drop: Optional[list] = None,
     use_videos: bool = True,
     image_writer_processes: int = 0,
     image_writer_threads: int = 16,
@@ -39,7 +41,7 @@ def transform_dataset(  # noqa: C901
         image_writer_processes: Number of processes for image writing.
         image_writer_threads: Number of threads for image writing.
         verbose: Whether to print progress information.
-
+        frames_to_drop: List of frame indices to drop from each episode.
     Returns:
         The transformed LeRobot dataset.
 
@@ -72,8 +74,8 @@ def transform_dataset(  # noqa: C901
         print(f"Loading dataset from {root_dir or repo_id}")
 
     dataset = LeRobotDataset(repo_id=repo_id, root=root_dir)
+    n_episodes = dataset.meta.total_episodes
     if episodes_to_drop:
-        n_episodes = len(dataset.episode_data_index["from"])
         episodes_to_include = [i for i in range(n_episodes)]
         episodes_to_include = set(episodes_to_include).difference(set(episodes_to_drop))
         print(f"dropping specified episodes, episodes to include = {episodes_to_include}")
@@ -92,9 +94,6 @@ def transform_dataset(  # noqa: C901
     # Apply feature transformation if provided
     if transform_features_fn is not None:
         new_features = transform_features_fn(new_features)
-    #print("======================== new features ========================")
-    #print(new_features)
-    #print("==============================================================")
     # Create a new empty dataset
     if verbose:
         print(f"Creating new dataset at {new_root_dir}")
@@ -110,13 +109,18 @@ def transform_dataset(  # noqa: C901
     )
 
     # Process each episode in the old dataset
-    episode_indices = dataset.episode_data_index
     if verbose:
-        print(f"Processing {len(episode_indices['from'])} episodes")
+        print(f"Processing {n_episodes} episodes")
 
-    for ep_idx in tqdm.tqdm(range(len(episode_indices["from"])), disable=not verbose):
-        from_idx, to_idx = episode_indices["from"][ep_idx], episode_indices["to"][ep_idx]
+    for ep_idx in tqdm.tqdm(range(n_episodes)):
+        episode_indices = dataset.meta.episodes[ep_idx]
+        from_idx = episode_indices["dataset_from_index"]
+        to_idx = episode_indices["dataset_to_index"]
+        #from_idx, to_idx = episode_indices["from"][ep_idx], episode_indices["to"][ep_idx]
+        init_frame = dataset[from_idx].copy()
         for idx in range(from_idx, to_idx):
+            if frames_to_drop and idx in from_idx + np.array(frames_to_drop):
+                continue
             frame = dataset[idx]
 
             # these are auto-generated, so remove them from the frame
@@ -137,13 +141,14 @@ def transform_dataset(  # noqa: C901
                     frame[key] = value
 
             # Apply the transformation function
-            new_frame = transform_fn(frame)
+            new_frame = transform_fn(frame, init_frame)
 
             # Add the transformed frame to the new dataset
             new_dataset.add_frame(new_frame)
 
         new_dataset.save_episode()
 
+    new_dataset.finalize()
     if verbose:
         print(f"Dataset transformation complete. New dataset saved at {new_root_dir}")
 

@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from loguru import logger
 
-from src.lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from src.lerobot.policies.diffusion.configuration_diffusion import PreTrainedConfig
-from src.lerobot.policies.factory import make_policy, make_pre_post_processors
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from lerobot.policies.diffusion.configuration_diffusion import PreTrainedConfig
+from lerobot.policies.factory import make_policy, make_pre_post_processors
 from robot_imitation_glue.base import BaseAgent
 
 

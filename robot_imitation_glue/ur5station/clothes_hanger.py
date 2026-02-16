@@ -9,7 +9,7 @@ from sensor_comm_dds.communication.data_classes.clotheshanger import Clotheshang
 import numpy as np
 import time
 import torch
-from spatial_concat_resnet import SpatialConcatResNet
+from soft_sensor.spatial_concat_resnet import SpatialConcatResNet
 import cv2
 from loguru import logger
 import rerun as rr

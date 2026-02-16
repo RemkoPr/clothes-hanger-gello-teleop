@@ -8,9 +8,11 @@ hf upload RemkoPr/test_dataset ./clothes-hanger-v3p7-w500h720-2cam-n50 --repo-ty
 
 ## Dataset visualisation:
 
-python lerobot/lerobot/scripts/visualize_dataset_html.py   --root datasets/2025-04-29_15-40-01/ --force-override 1 --repo-id test/test
+python lerobot/src/lerobot/scripts/lerobot_dataset_viz.py   --root datasets/2clothes2hanger-test2/ --repo-id test/test --episode-index 0 --display-compressed-images true
 
-In the above, the --repo-id doesn't matter, so literally test/test is fine.
+OR
+
+Upload your dataset to huggingface, go to https://huggingface.co/spaces/lerobot/visualize_dataset en enter the dataset id.
 
 ## Preprocessing
 
@@ -36,7 +38,7 @@ ctrl+a ctrl+d -> detaches session
 screen -Rd session_name -> reattaches session
 
 ## Downloading HF model
-hf download RemkoPr/test_dataset_model --local-dir "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train"
+hf download RemkoPr/test_dataset_model --local-dir "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2026-02-11"
 
 ## Evaluation
 
