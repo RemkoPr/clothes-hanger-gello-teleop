@@ -30,7 +30,7 @@ class EpisodeViewer:
 
         # Load policy
         policy, preprocessor, postprocessor = make_lerobot_policy_for_inference(checkpoint_path)
-        self.lerobot_agent = LerobotAgent(policy,preprocessor, postprocessor, "cuda", lambda x: x)
+        self.lerobot_agent = LerobotAgent(policy, preprocessor, postprocessor, "cuda", lambda x: x)
  
         # State
         self.episode_idx = 0
@@ -233,13 +233,13 @@ if __name__ == "__main__":
     # Dataset to inference
     #root_dir = "datasets/clothes-hanger-v3p3-w426h480"
 
-    dataset_to_inference_root_dir = "datasets/2clothes2hanger-bch-lbts-PREPR"
+    dataset_to_inference_root_dir = "datasets/a-PREPR-INSTR0"
     
     repo_id = "repo_id"
     # Model
 
-    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/2clothes2hanger-bch-lbts-PREPR"
-    model_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/2026-02-11"
+    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/a-PREPR-INSTR0"
+    model_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/a-INSTR0"
     
     viewer = EpisodeViewer(dataset_to_inference_root_dir, repo_id, model_checkpoint_path, train_dataset_path, dataset_type="TRAIN", model_type="INSTR", sophie_cam=False)
     viewer.load_episode(3)

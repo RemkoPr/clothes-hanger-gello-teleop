@@ -22,6 +22,7 @@ def transform_dataset(  # noqa: C901
     image_writer_processes: int = 0,
     image_writer_threads: int = 16,
     verbose: bool = True,
+    normalise_ch_values: bool = True,
 ) -> LeRobotDataset:
     """Transform a LeRobot dataset using custom mapping functions.
 
@@ -117,7 +118,7 @@ def transform_dataset(  # noqa: C901
         from_idx = episode_indices["dataset_from_index"]
         to_idx = episode_indices["dataset_to_index"]
         #from_idx, to_idx = episode_indices["from"][ep_idx], episode_indices["to"][ep_idx]
-        init_frame = dataset[from_idx].copy()
+        init_frame = dataset[from_idx].copy() if normalise_ch_values else None
         for idx in range(from_idx, to_idx):
             if frames_to_drop and idx in from_idx + np.array(frames_to_drop):
                 continue

@@ -10,9 +10,8 @@ from robot_imitation_glue.lerobot_dataset.transform_dataset import transform_dat
 # 1. convert to joint actions and joint configuration state with absolute gripper
 
 
-features_to_drop = []
+features_to_drop = ['scene_image_original', 'wrist_wilson_image_original', 'wrist_sophie_image', 'wrist_sophie_image_original']
 crop_width_range = (320+0, 960-0)
-crop_width = crop_width_range[1] - crop_width_range[0]
 crop_height_range = (0, 720)
 crop_height = crop_height_range[1] - crop_height_range[0]
 crop_width = crop_width_range[1] - crop_width_range[0]
@@ -37,8 +36,8 @@ def features_transform(features, include_instr=True):
 
 
 def joints_frame_transform(frame, init_frame=None, include_instr=True):
-    current_joints = frame["joints"].numpy()
-    current_gripper = np.array([frame["gripper_states"][1]])
+    current_joints = frame["teleop_robot_joints"].numpy()
+    current_gripper = np.array([frame["gripper_on_static_robot"][0]])
     action_joints = frame["action"][:6]  #.numpy()
     action_gripper = np.array([frame["action"][6]])  #.numpy()
     if init_frame is not None:
@@ -65,12 +64,14 @@ def joints_frame_transform(frame, init_frame=None, include_instr=True):
 
 
 INCLUDE_INSTR = False
+root_dir = "datasets/b"
 transform_dataset(
-    root_dir="datasets/a",
-    new_root_dir=f"datasets/a-PREPR-INSTR{1 if INCLUDE_INSTR else 0}",
+    root_dir=root_dir,
+    new_root_dir=root_dir + f"-PREPR-INSTR{1 if INCLUDE_INSTR else 0}",
     transform_fn=partial(joints_frame_transform, include_instr=INCLUDE_INSTR),  # 
     transform_features_fn=partial(features_transform, include_instr=INCLUDE_INSTR),
     features_to_drop=features_to_drop,
-    episodes_to_drop=[],#[i for i in range(1, 179)], #[140, 171]#
-    frames_to_drop=[0]  # drop every first frame: this is the clotheshanger baseline measurement in home pose
+    episodes_to_drop=[21],#[i for i in range(1, 179)], #[140, 171]#
+    frames_to_drop=[0],  # drop every first frame: this is the clotheshanger baseline measurement in home pose
+    normalise_ch_values=True
 )

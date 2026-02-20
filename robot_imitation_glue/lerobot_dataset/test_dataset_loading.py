@@ -1,6 +1,8 @@
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
-dataset = LeRobotDataset(repo_id="whatevs", root="datasets/a-test4")
+dataset = LeRobotDataset(repo_id="whatevs", root="datasets/b")
 print(f"Num episodes: {dataset.num_episodes}")
-print(dataset[2]['actual_timestamp']-dataset[1]['actual_timestamp'])
+#for idx in range(1, len(dataset)):
+#    print(dataset[idx]['actual_timestamp']-dataset[idx-1]['actual_timestamp'])
+print(dataset[200]['clothes_hanger'])

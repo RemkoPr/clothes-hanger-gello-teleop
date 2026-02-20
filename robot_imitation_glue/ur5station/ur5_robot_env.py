@@ -99,8 +99,8 @@ class UR5eStation(BaseEnv):
 
         self.teleop_robot = self.sophie
         self.hold_robot = self.wilson
-        self.gripper_teleop = self.gripper_sophie
-        self.gripper_hold = self.gripper_wilson
+        self.gripper_on_teleop_robot = self.gripper_sophie
+        self.gripper_on_static_robot = self.gripper_wilson
 
         #ch_baseline = np.array([227, 239, 217, 211])
         self.clothes_hanger = ClothesHanger()  # >TODO: automatically derive baseline from train set
@@ -110,8 +110,8 @@ class UR5eStation(BaseEnv):
         self.clothes_hanger_spoof = None#ClothesHangerSpoof(baseline=ch_baseline, concat_type="WIDTH")
         
         if INIT_GRASPS:
-            self.wilson.gripper.open()
-            self.sophie.gripper.open()
+            self.gripper_on_static_robot.open()
+            self.gripper_on_teleop_robot.open()
         wilson_awaitable = self.wilson.move_to_joint_configuration(
             HOLD_SHIRT_JOINTS_WILSON_VERTICAL, joint_speed=0.1
         )
@@ -182,18 +182,14 @@ class UR5eStation(BaseEnv):
                     gello_usb_port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT792DZ5-if00-port0",
                     gello_config=GelloTeleopDevice.GELLO1_DEFAULT_CONFIG,
                     ur_robot=self.teleop_robot,
-                    gripper=self.gripper_teleop,
+                    gripper=self.gripper_on_teleop_robot,
                     use_joint_space=True)
 
         if INIT_GRASPS:
             input("Grasp shirt?")
-            self.gripper_hold.move(0.0, speed=2*self.gripper_hold.gripper_specs.min_speed, force=self.gripper_hold.gripper_specs.max_force).wait()
+            self.gripper_on_static_robot.move(0.0, speed=2*self.gripper_on_static_robot.gripper_specs.min_speed, force=self.gripper_on_static_robot.gripper_specs.max_force).wait()
             input("Grasp clothes hanger?")
-            self.gripper_teleop.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.gripper_teleop.gripper_specs.min_speed, force=self.gripper_teleop.gripper_specs.min_force).wait()
-
-
-    def get_joint_configuration(self):
-        return self.teleop_robot.get_joint_configuration()
+            self.gripper_on_teleop_robot.move(CLOTHES_HANGER_GRASP_WIDTH, speed=2*self.gripper_on_teleop_robot.gripper_specs.min_speed, force=self.gripper_on_teleop_robot.gripper_specs.min_force).wait()
 
     def get_robot_pose_euler(self):
         """
@@ -206,6 +202,9 @@ class UR5eStation(BaseEnv):
 
     def get_robot_pose_se3(self):
         return self.teleop_robot.get_tcp_pose()
+    
+    def get_joint_configuration(self):
+        raise NotImplementedError("get_joint_configuration is not implemented, ambiguous name when two robot arms are involved.")
 
     def move_robot_to_tcp_pose(self, pose):
         self.teleop_robot.move_to_tcp_pose(pose).wait()
@@ -217,10 +216,13 @@ class UR5eStation(BaseEnv):
         self.teleop_robot.move_to_joint_configuration(HOME_JOINTS_SOPHIE, joint_speed=joint_speed).wait()
 
     def move_gripper(self, width):
-        self.gripper_teleop.move(width).wait()
+        self.gripper_on_teleop_robot.move(width).wait()
 
     def get_gripper_openings(self):
-        return np.array([self.gripper_teleop.get_current_width(), self.gripper_hold.get_current_width()])
+        return {    
+            "gripper_on_teleop_robot": self.gripper_on_teleop_robot.get_current_width(),
+            "gripper_on_static_robot": self.gripper_on_static_robot.get_current_width()
+        }
 
     def _set_robot_target_pose(self, target_pose):
         # target_pose is a 4x4 homogeneous transformation matrix
@@ -242,29 +244,25 @@ class UR5eStation(BaseEnv):
         wrist_sophie_image_resized = cv2.resize(wrist_sophie_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
         scene_image_resized = cv2.resize(scene_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
 
-        robot_state = self.get_joint_configuration().astype(np.float32)  # set to joint configuration
-        gripper_states = self.get_gripper_openings().astype(np.float32)
-        joints = self.teleop_robot.get_joint_configuration().astype(np.float32)
+        teleop_robot_joints = self.teleop_robot.get_joint_configuration().astype(np.float32)  # set to joint configuration
+        gripper_states = self.get_gripper_openings()
+        gripper_on_static_robot = np.array([gripper_states["gripper_on_static_robot"]]).astype(np.float32)
         clothes_hanger_values = self.clothes_hanger.read().astype(np.float32)
         if self.clothes_hanger_spoof:
             clothes_hanger_spoof_values = self.clothes_hanger_spoof.read(scene_img=scene_image, wrist_img=wrist_wilson_image)
         else:
             clothes_hanger_spoof_values = np.zeros(4, dtype=np.float32)*-1
 
-        #state = np.concatenate((robot_state, gripper_states), axis=0)
-        state = np.concatenate((robot_state, gripper_states, clothes_hanger_values), axis=0)  # not directly used, state is instead formed in ur5station/prepare_datasets
+        state = np.concatenate((teleop_robot_joints, gripper_on_static_robot, clothes_hanger_values), axis=0)  # not directly used, state is instead formed in ur5station/prepare_datasets
 
         obs_dict = {
             "wrist_wilson_image": wrist_wilson_image,
-            #"wrist_wilson_image": wrist_wilson_image_resized,
-            #"wrist_sophie_image_original": wrist_sophie_image,
-            #"wrist_sophie_image": wrist_sophie_image_resized,
             "scene_image": scene_image,
-            #"scene_image": scene_image_resized,
             "state": state,
-            "robot_pose": robot_state,
-            "gripper_states": gripper_states,
-            "joints": joints,
+            "gripper_on_teleop_robot": np.array([gripper_states["gripper_on_teleop_robot"]]).astype(np.float32),
+            "gripper_on_static_robot": gripper_on_static_robot,
+            "teleop_robot_joints": teleop_robot_joints,
+            "hold_robot_joints": self.hold_robot.get_joint_configuration().astype(np.float32),
             "clothes_hanger": clothes_hanger_values,
             "clothes_hanger_spoof": clothes_hanger_spoof_values,
             "actual_timestamp": np.array([time.time() - self.init_time]).astype(np.float32),
@@ -276,16 +274,7 @@ class UR5eStation(BaseEnv):
 
     def act(self, robot_pose, gripper_pose, timestamp, disable_gripper=False, control_space="JOINT"):
 
-        if isinstance(gripper_pose, np.ndarray):
-            gripper_pose = gripper_pose[0].item()
-
-        # move robot to target pose
-        current_time = time.time()
-        duration = timestamp - current_time
-        if duration < 0:
-            logger.warning("Action duration is negative, setting it to 0")
-            duration = 0
-        logger.debug(f"Moving robot to pose \n {robot_pose} with duration {duration}")
+        assert isinstance(gripper_pose, float), "Gripper pose should be a float representing the desired gripper width."
 
         if control_space == "TOOL":
             robot_pose_se3 = robot_pose.copy()
@@ -351,6 +340,13 @@ class UR5eStation(BaseEnv):
                 logger.warning("TCP pose is not reachable, not executing action")
                 valid_pose = False'''
             if valid_pose:
+                # move robot to target pose
+                current_time = time.time()
+                duration = timestamp - current_time
+                if duration < 0:
+                    logger.warning("Action duration is negative, setting it to 0")
+                    duration = 0
+                logger.debug(f"Moving robot to pose \n {robot_pose} with duration {duration}")
                 self.teleop_robot.servo_to_joint_configuration(robot_pose, duration)
         else:
             raise ValueError(f"Unknown control space: {control_space}")
@@ -358,14 +354,14 @@ class UR5eStation(BaseEnv):
 
         # move gripper to target width
         if not disable_gripper:
-            gripper_width = self.gripper_hold.gripper_specs.max_width - np.clip(
-                gripper_pose, self.gripper_hold.gripper_specs.min_width, self.gripper_hold.gripper_specs.max_width
+            gripper_width = self.gripper_on_static_robot.gripper_specs.max_width - np.clip(
+                gripper_pose, self.gripper_on_static_robot.gripper_specs.min_width, self.gripper_on_static_robot.gripper_specs.max_width
             )
-            if gripper_width < self.gripper_hold.gripper_specs.min_width + 0.005:
-                gripper_width = self.gripper_hold.gripper_specs.min_width
+            if gripper_width < self.gripper_on_static_robot.gripper_specs.min_width + 0.005:
+                gripper_width = self.gripper_on_static_robot.gripper_specs.min_width
             logger.debug(f"Setting gripper width to {gripper_width}")
             time_before_gripper = time.time()
-            self.gripper_hold.servo(gripper_width)
+            self.gripper_on_static_robot.servo(gripper_width)
             time_after_gripper = time.time()
             logger.debug(f"Gripper servo time: {time_after_gripper - time_before_gripper}")
 
@@ -374,12 +370,12 @@ class UR5eStation(BaseEnv):
 
     def toggle_holding_gripper(self):
         logger.info("Toggling holding gripper.")
-        if self.gripper_hold.get_current_width() > 0.04:
+        if self.gripper_on_static_robot.get_current_width() > 0.04:
             logger.info("Closing holding gripper.")
-            self.gripper_hold.close().wait()
+            self.gripper_on_static_robot.close().wait()
         else:
             logger.info("Opening holding gripper.")
-            self.gripper_hold.open().wait()
+            self.gripper_on_static_robot.open().wait()
 
     def move_hold_robot_random_translation(self, max_translation=0.05):
         translation = np.random.uniform(-max_translation, max_translation, size=3)
@@ -439,7 +435,16 @@ def abs_joint_policy_action_to_joint_pose(current_pose, current_gripper_state, a
 if __name__ == "__main__":
     # set cli logging level to debug
 
-    env = UR5eStation()
+
+    logger.info("connecting to Wilson.")
+    wilson = URrtde(WILSON_IP, URrtde.UR3E_CONFIG)
+    logger.info("connecting to Sophie.")
+    sophie = URrtde(SOPHIE_IP, URrtde.UR3E_CONFIG)
+    wilson_awaitable = wilson.move_to_joint_configuration(HOLD_SHIRT_JOINTS_WILSON_VERTICAL, joint_speed=0.1)
+    sophie_awaitable = sophie.move_to_joint_configuration(HOME_JOINTS_SOPHIE, joint_speed=0.1).wait()
+    wilson_awaitable.wait()
+
+    '''env = UR5eStation()
 
     agent = GelloAgent(dynamixel_config, GELLO_AGENT_PORT)
 
@@ -472,4 +477,4 @@ if __name__ == "__main__":
 
     env.robot.gripper.move(0.04).wait()
     time.sleep(5)
-    env.robot.gripper.move(0.0).wait()
+    env.robot.gripper.move(0.0).wait()'''

@@ -1233,11 +1233,11 @@ def _expand_sparse_episodes(dataset: DebugLeRobotDataset) -> None:
 
 
 
-broken_dataset_root = "datasets/a_broken"
+broken_dataset_root = "datasets/v3-raw"
 dataset = DebugLeRobotDataset(repo_id="whatevs", root=broken_dataset_root)#, episodes=[0, 3])
 _expand_sparse_episodes(dataset)
 assert len(dataset.meta.episodes) == dataset.num_episodes, "Number of episodes in metadata does not match dataset.num_episodes. Adapt this manually in meta > info.json"
-fixed_dataset_root = "datasets/a_fixed"
+fixed_dataset_root = "datasets/v3-raw-idxfixed"
 new_dataset = renumber_episodes(dataset, output_dir=fixed_dataset_root)
 print(f"Old episode indices: {_get_episode_indices(dataset.meta.episodes)}")
 print(f"New episode indices: {_get_episode_indices(new_dataset.meta.episodes)}")

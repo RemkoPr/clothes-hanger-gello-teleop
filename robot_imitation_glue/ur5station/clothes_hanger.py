@@ -30,8 +30,10 @@ class ClothesHanger:
 
     def read(self):
         values = np.array(self.reader.take_one(timeout=duration(seconds=5)).taxel_values).astype(np.uint8) - self.offsets
-        if self.thresholds.all():
-            values = (values > self.thresholds)*self.baseline
+        if self.baseline.all():
+            values = np.maximum(self.baseline - values, 0)
+        #if self.thresholds.all():
+        #    values = (values > self.thresholds)*self.baseline
         return values
     
     def init_thesholds(self):
@@ -44,6 +46,9 @@ class ClothesHanger:
         if not self.baseline.all():
             raise ValueError("Baseline values must be provided to initialize offsets.")
         self.offsets = init_vals - self.baseline
+
+    def init_baseline(self, baseline):
+        self.baseline = np.array(baseline)
     
 class ClothesHangerMock:
     def read(self):
@@ -53,6 +58,9 @@ class ClothesHangerMock:
         pass
     
     def init_thesholds(self):
+        pass
+
+    def init_baseline(self, _):
         pass
 
 class ClothesHangerSpoof:

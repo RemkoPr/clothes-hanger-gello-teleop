@@ -142,7 +142,7 @@ def collect_data(  # noqa: C901
             if not state.initialising and event.start_init:
                 logger.info("======================= Initialising demo")
                 state.initialising = True
-                env.move_hold_robot_random_translation()
+                #env.move_hold_robot_random_translation()
                 shirt_initialiser.init_random_line()
                 env.move_teleop_robot_to_home_pose(joint_speed=0.2)
                 observation = env.get_observations()
@@ -253,6 +253,8 @@ def collect_data(  # noqa: C901
                 continue
 
             action = env.teleop_agent.get_action()
+            observation["original_gripper_action"] = action[6]
+            action[6] = env.gripper_on_static_robot.gripper_specs.max_width if action[6] > env.gripper_on_static_robot.gripper_specs.max_width - 0.004 else env.gripper_on_static_robot.gripper_specs.min_width
             logger.info(f"Action: {action}")
 
             # store the actions in absolute format, to facilitate any action conversion later on.
