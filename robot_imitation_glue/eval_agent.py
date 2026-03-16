@@ -13,6 +13,7 @@ from robot_imitation_glue.utils import precise_wait
 from robot_imitation_glue.ur5station.shirt_initialiser import ShirtInitialiser
 
 logger = loguru.logger
+TIMEOUT_S = 120  # 2 minutes
 
 
 class State:
@@ -124,7 +125,7 @@ def eval(  # noqa: C901
         env_observation_image_keys = [env_observation_image_key] if env_observation_image_key else ["scene_image"]
 
     rr.init("robot_imitation_glue_eval")
-    rr.spawn(port=9875, memory_limit="20%", connect=True)
+    rr.spawn(port=9875, memory_limit="10%", connect=True)
 
     state = State()
     event = Event()
@@ -149,6 +150,8 @@ def eval(  # noqa: C901
             logger.info(f"Eval episode {eval_dataset_episode} instruction: {instruction}")
 
     control_period = 1 / fps
+    set_stop_rollout = False
+    previous_scene_image = env._scene_camera_subscriber.get_rgb_image_as_int()
     while not state.is_stopped:
         try:
             cycle_end_time = time.time() + control_period
@@ -163,7 +166,8 @@ def eval(  # noqa: C901
                 observation = env.get_observations()
                 recorder.start_episode()
                 recorder.record_step(observation, np.array([0] * 7).astype(np.float32))
-                env.clothes_hanger.init_baseline(observation["clothes_hanger"])
+                env.clothes_hanger.init_baseline(observation["clothes_hanger_raw"])
+                #env.clothes_hanger.init_thresholds(20)
                 policy_agent.reset()
                 if not state.is_paused:
                     env.teleop_robot.move_to_joint_configuration(env.teleop_agent.get_action()[:6], joint_speed=0.2).wait()
@@ -173,7 +177,11 @@ def eval(  # noqa: C901
                 state.rollout_active = True
                 state.initialising = False
                 state.is_paused = False
-
+                # Get initial observation and inference n_action_steps times to populate model's memory (if applicable) before starting the rollout
+                observation = env.get_observations()
+                for _ in range(policy_agent.policy.config.n_action_steps*2):  # *2 to be safe
+                    action = policy_agent.get_action(observation)
+                t_start_rollout = time.time()
             elif state.rollout_active and event.stop_rollout:
                 logger.info("======================= Stop rollout")
                 state.rollout_active = False
@@ -182,6 +190,9 @@ def eval(  # noqa: C901
                 recorder.reinitialize_dataset()
                 logger.info(f"Saved episode {recorder.n_recorded_episodes}")
                 state.is_paused = True
+            elif state.rollout_active and (time.time() - t_start_rollout > TIMEOUT_S):
+                set_stop_rollout = True
+                logger.warning(f"Rollout timeout of {TIMEOUT_S} seconds exceeded, stopping rollout and saving data.")
 
             elif (state.rollout_active or state.initialising) and event.cancel_rollout:
                 logger.info("======================= Cancel rollout")
@@ -233,6 +244,9 @@ def eval(  # noqa: C901
 
             # Clear all events
             event.clear()
+            if set_stop_rollout:
+                event.stop_rollout = True
+                set_stop_rollout = False
 
             # ── Observations & GUI ────────────────────────────────────
             observation = env.get_observations()
@@ -251,8 +265,8 @@ def eval(  # noqa: C901
                 f" # episodes: {recorder.n_recorded_episodes}",
                 (10, 150),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
+                1,
+                (150, 150, 255),
                 2,
             )
             rr.log("clothes_hanger", rr.Scalars(observation["clothes_hanger"]))
@@ -278,7 +292,11 @@ def eval(  # noqa: C901
             if state.rollout_active:
                 action = policy_agent.get_action(observation)
                 logger.debug(f"policy action: {action}")
-
+                '''current_scene_image = observation["scene_image"]
+                if abs(previous_scene_image - current_scene_image).mean() > 0.2:
+                    logger.warning("Large scene image difference detected between steps, possible camera glitch. Not executing action and not recording this step.")
+                    previous_scene_image = current_scene_image
+                    continue'''
                 env.act(
                     robot_pose=action[:6],
                     gripper_pose=action[6],

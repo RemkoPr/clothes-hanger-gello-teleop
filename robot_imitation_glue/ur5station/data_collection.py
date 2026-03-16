@@ -69,7 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_name", type=str, default=f"b")
     args = parser.parse_args()
 
-    env = UR5eStation()
+    env = UR5eStation(mode="DATA")
 
     dataset_recorder = LeRobotDatasetRecorder(
         example_obs_dict=env.get_observations(),

@@ -86,7 +86,15 @@ class EpisodeViewer:
         true_actions_list = []
         pred_actions_list = []
         inference_times = []
-
+        
+        # Inference first frame to get an observation step loaded in the model's memory
+        for _ in range(self.lerobot_agent.policy.config.n_action_steps):
+            item = dict(self.dataset[self.episode_start_idx])  # copy to avoid changing the dataset
+            item.pop("task", None)
+            item_no_action = item.copy()
+            item_no_action.pop("action", None)  # technically not necessary since preprocessor removes it, but for clarity (if action in obesrvation, get_action will not inference)
+            pred = self.lerobot_agent.get_action(item_no_action)
+        
         logger.warning(f"Loading episode {idx} from {self.episode_start_idx} to {self.episode_to_idx}")
         for i in range(self.episode_start_idx, self.episode_to_idx):
             item = dict(self.dataset[i])  # copy to avoid changing the dataset
@@ -107,11 +115,20 @@ class EpisodeViewer:
         self.pred_actions = np.stack(pred_actions_list)
         self.n = self.true_actions.shape[0]
 
+        # Loss metrics
+        mse_per_joint = np.mean((self.true_actions - self.pred_actions) ** 2, axis=0)
+        mae_per_joint = np.mean(np.abs(self.true_actions - self.pred_actions), axis=0)
+        mse_total = float(np.mean(mse_per_joint))
+        mae_total = float(np.mean(mae_per_joint))
+        logger.info(f"Episode {idx} loss  |  MSE: {mse_total:.6f}  MAE: {mae_total:.6f}")
+        logger.info(f"  per-joint MSE: {np.array2string(mse_per_joint, precision=6, separator=', ')}")
+        logger.info(f"  per-joint MAE: {np.array2string(mae_per_joint, precision=6, separator=', ')}")
+
     def init_plot(self):
         """Initialize figure and widgets."""
         self.fig = plt.figure(figsize=(12, 8))
         self.fig.suptitle(f"Inference dataset: {self.dataset_root.split('/')[-1]}\
-                          \nModel: {self.checkpoint_path.split('/')[-4]}\
+                          \nModel: {self.checkpoint_path.split('/')[-1]}\
                           \nTrain dataset: {self.train_dataset_path.split('/')[-1]}", fontsize=16)
         self.ax_scene = self.fig.add_subplot(2, 3, 1)
         self.ax_wilson = self.fig.add_subplot(2, 3, 2)
@@ -233,15 +250,15 @@ if __name__ == "__main__":
     # Dataset to inference
     #root_dir = "datasets/clothes-hanger-v3p3-w426h480"
 
-    dataset_to_inference_root_dir = "datasets/a-PREPR-INSTR0"
+    dataset_to_inference_root_dir = "datasets/b-n200-PREPR-INSTR1"
     
     repo_id = "repo_id"
     # Model
 
-    train_dataset_path = "/storage/rproesma/clothes-hanger/datasets/a-PREPR-INSTR0"
-    model_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/a-INSTR0"
+    train_dataset_path = "/storage/rproesma/clothes-hanger/" + dataset_to_inference_root_dir
+    model_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/b-n200-INSTR1-300k-1enc"
     
     viewer = EpisodeViewer(dataset_to_inference_root_dir, repo_id, model_checkpoint_path, train_dataset_path, dataset_type="TRAIN", model_type="INSTR", sophie_cam=False)
-    viewer.load_episode(3)
+    viewer.load_episode(148)
     viewer.init_plot()
     viewer.show()

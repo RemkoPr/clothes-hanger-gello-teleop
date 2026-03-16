@@ -2,6 +2,7 @@ import os
 import shutil
 from typing import Callable, Dict, Optional
 
+from loguru import logger
 import numpy as np
 import tqdm
 
@@ -23,6 +24,7 @@ def transform_dataset(  # noqa: C901
     image_writer_threads: int = 16,
     verbose: bool = True,
     normalise_ch_values: bool = True,
+    remove_corrupted_frames: bool = True,
 ) -> LeRobotDataset:
     """Transform a LeRobot dataset using custom mapping functions.
 
@@ -43,6 +45,8 @@ def transform_dataset(  # noqa: C901
         image_writer_threads: Number of threads for image writing.
         verbose: Whether to print progress information.
         frames_to_drop: List of frame indices to drop from each episode.
+        normalise_ch_values: Whether to normalise channel values.
+        remove_corrupted_frames: Whether to remove corrupted frames.
     Returns:
         The transformed LeRobot dataset.
 
@@ -75,12 +79,15 @@ def transform_dataset(  # noqa: C901
         print(f"Loading dataset from {root_dir or repo_id}")
 
     dataset = LeRobotDataset(repo_id=repo_id, root=root_dir)
-    n_episodes = dataset.meta.total_episodes
+    total_episodes = dataset.meta.total_episodes
     if episodes_to_drop:
-        episodes_to_include = [i for i in range(n_episodes)]
-        episodes_to_include = set(episodes_to_include).difference(set(episodes_to_drop))
+        episodes_to_include = [i for i in range(total_episodes)]
+        episodes_to_include = sorted(set(episodes_to_include).difference(set(episodes_to_drop)))
         print(f"dropping specified episodes, episodes to include = {episodes_to_include}")
         dataset = LeRobotDataset(repo_id=repo_id, root=root_dir, episodes=episodes_to_include)
+        
+
+    selected_episode_ids = dataset.episodes if dataset.episodes is not None else list(range(dataset.meta.total_episodes))
 
     # Get the original features
     old_features = dataset.features
@@ -111,23 +118,47 @@ def transform_dataset(  # noqa: C901
 
     # Process each episode in the old dataset
     if verbose:
-        print(f"Processing {n_episodes} episodes")
+        print(f"Processing {len(selected_episode_ids)} episodes")
 
-    for ep_idx in tqdm.tqdm(range(n_episodes)):
+    absolute_to_relative_idx = getattr(dataset, "_absolute_to_relative_idx", None)
+    dropped_frame_idxs = []
+
+    for ep_idx in tqdm.tqdm(selected_episode_ids):
         episode_indices = dataset.meta.episodes[ep_idx]
         from_idx = episode_indices["dataset_from_index"]
         to_idx = episode_indices["dataset_to_index"]
         #from_idx, to_idx = episode_indices["from"][ep_idx], episode_indices["to"][ep_idx]
-        init_frame = dataset[from_idx].copy() if normalise_ch_values else None
-        for idx in range(from_idx, to_idx):
-            if frames_to_drop and idx in from_idx + np.array(frames_to_drop):
+        if normalise_ch_values:
+            init_lookup_idx = (
+                absolute_to_relative_idx[from_idx] if absolute_to_relative_idx is not None else from_idx
+            )
+            init_frame = dataset[init_lookup_idx].copy()
+        else:
+            init_frame = None
+        # initialise previous frame as first frame of dataset (excluding the init frame in the home pose)
+        first_frame_idx = absolute_to_relative_idx[from_idx+1] if absolute_to_relative_idx is not None else from_idx+1
+        previous_frame = dataset[first_frame_idx].copy()
+        for abs_idx in range(from_idx, to_idx):
+            if frames_to_drop and abs_idx in from_idx + np.array(frames_to_drop):
                 continue
-            frame = dataset[idx]
+
+            lookup_idx = absolute_to_relative_idx[abs_idx] if absolute_to_relative_idx is not None else abs_idx
+            frame = dataset[lookup_idx]
+
+            # drop corrupted frames from zed cameras
+            scene_cam_diff  = (frame["scene_image"]  - previous_frame["scene_image"]).abs().mean()
+            wrist_cam_diff  = (frame["wrist_wilson_image"]  - previous_frame["wrist_wilson_image"]).abs().mean()
+            if (scene_cam_diff > 0.2 or wrist_cam_diff > 0.2) and remove_corrupted_frames:
+                logger.warning(f"Large image difference detected at episode {ep_idx}, frame {abs_idx} (scene_diff={scene_cam_diff:.3f}, wrist_diff={wrist_cam_diff:.3f}).")
+                dropped_frame_idxs.append(abs_idx)
+                continue
+            previous_frame = frame.copy()
 
             # these are auto-generated, so remove them from the frame
             features_to_drop_list = ["index", "timestamp", "frame_index", "episode_index", "task_index"]
             if features_to_drop:
                 features_to_drop_list.extend(features_to_drop)
+            
             frame = {k: v for k, v in frame.items() if k not in features_to_drop_list}
 
             for key, value in frame.items():
@@ -151,7 +182,8 @@ def transform_dataset(  # noqa: C901
 
     new_dataset.finalize()
     if verbose:
-        print(f"Dataset transformation complete. New dataset saved at {new_root_dir}")
+        logger.info(f"Dataset transformation complete. New dataset saved at {new_root_dir}")
+        logger.warning(f"Dropped frames due to large image differences: {dropped_frame_idxs}")
 
     return new_dataset
 

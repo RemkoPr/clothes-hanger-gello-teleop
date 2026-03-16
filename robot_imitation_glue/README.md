@@ -2,8 +2,8 @@
 run robot_imitation_glue/robot_imitation_glue/ur5station/data_collection.py
 
 ## Upload dataset to HF
-hf auth login --token [token] --add-to-git-credential  % for token see jupyterhub script start_diffusion_training.sh
-hf upload RemkoPr/test_dataset ./clothes-hanger-v3p7-w500h720-2cam-n50 --repo-type=dataset
+hf auth login --token [token] --add-to-git-credential  % for token see jupyterhub script "start_diffusion_training.sh"
+hf upload RemkoPr/test_dataset ./datasets/clothes-hanger-v3p7-w500h720-2cam-n50 --repo-type=dataset
 
 
 ## Dataset visualisation:

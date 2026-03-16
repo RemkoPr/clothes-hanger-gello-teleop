@@ -37,8 +37,8 @@ def features_transform(features, include_instr=True):
 
 
 def joints_frame_transform(frame, init_frame=None, include_instr=True):
-    current_joints = frame["teleop_robot_joints"].numpy()
-    current_gripper = frame["gripper_on_static_robot"]  # convoluted expression, change to simply "frame["gripper_on_static_robot"]"
+    current_joints = frame["robot_pose"].numpy()
+    current_gripper = np.array([0])#np.array([frame["gripper_on_static_robot"][0]])
     action_joints = frame["action"][:6]  #.numpy()
     action_gripper = np.array([frame["action"][6]])  #.numpy()
     if init_frame is not None:
@@ -66,16 +66,18 @@ def joints_frame_transform(frame, init_frame=None, include_instr=True):
     return new_frame
 
 
-INCLUDE_INSTR = True
-root_dir = "datasets/b"
+INCLUDE_INSTR = False
+root_dir = "datasets/v3-raw-n100"
 transform_dataset(
     root_dir=root_dir,
-    new_root_dir=root_dir + f"-n200-PREPR-INSTR{1 if INCLUDE_INSTR else 0}",
+    new_root_dir=root_dir + f"-init-frames",
+    #new_root_dir=root_dir + f"-n200-PREPR-INSTR{1 if INCLUDE_INSTR else 0}",
     transform_fn=partial(joints_frame_transform, include_instr=INCLUDE_INSTR),  # 
     transform_features_fn=partial(features_transform, include_instr=INCLUDE_INSTR),
     features_to_drop=features_to_drop,
-    episodes_to_drop=[21],#[i for i in range(1, 179)], #[140, 171]#
-    frames_to_drop=[0],  # drop every first frame: this is the clotheshanger baseline measurement in home pose
+    episodes_to_drop=[i for i in range(30, 100)],#[i for i in range(1, 179)], #[140, 171]#
+    #frames_to_drop=[0],  # drop every first frame: this is the clotheshanger baseline measurement in home pose
+    frames_to_drop=[i for i in range(1, 1000)],
     normalise_ch_values=True,
     remove_corrupted_frames=False
 )

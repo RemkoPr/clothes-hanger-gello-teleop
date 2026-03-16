@@ -29,16 +29,18 @@ class ClothesHanger:
         self.reader = DataReader(domain_participant, topic, listener=listener, qos=qos)
 
     def read(self):
-        values = np.array(self.reader.take_one(timeout=duration(seconds=5)).taxel_values).astype(np.uint8) - self.offsets
+        values_raw = np.array(self.reader.take_one(timeout=duration(seconds=5)).taxel_values).astype(np.uint8) - self.offsets
         if self.baseline.all():
-            values = np.maximum(self.baseline - values, 0)
-        #if self.thresholds.all():
-        #    values = (values > self.thresholds)*self.baseline
-        return values
+            values = np.maximum(self.baseline - values_raw, 0)
+        else:
+            values = values_raw.copy()
+        if self.thresholds.all():
+            values = (values > self.thresholds)*self.baseline
+        return values, values_raw
     
-    def init_thesholds(self):
+    def init_thresholds(self, threshold=20):
         if self.baseline.all():
-            self.thresholds = self.baseline - 30
+            self.thresholds = np.array([threshold for _ in range(4)])
         else:
             raise ValueError("Baseline values must be provided to initialize thresholds.")
     
@@ -52,7 +54,7 @@ class ClothesHanger:
     
 class ClothesHangerMock:
     def read(self):
-        return np.array([0 for _ in range(4)])
+        return np.array([0 for _ in range(4)]), np.array([0 for _ in range(4)])
     
     def init_offsets(self, _):
         pass

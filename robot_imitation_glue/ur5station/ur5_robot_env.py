@@ -60,7 +60,7 @@ logger = loguru.logger
 
 
 MAX_TRANSLATION = 0.15
-MAX_JOINT_DELTA = 10 * np.pi / 180
+MAX_JOINT_DELTA = 3 * np.pi / 180
 
 class CameraFactory:
     def create_wrist_camera(serial_number):
@@ -77,8 +77,8 @@ class UR5eStation(BaseEnv):
     ACTION_SPEC = None
     PROPRIO_OBS_SPEC = None
 
-    def __init__(self):
-
+    def __init__(self, mode="DATA"):
+        self.mode = mode
         # set up robot and gripper
         # logger.info("connecting to gripper.")
 
@@ -119,37 +119,20 @@ class UR5eStation(BaseEnv):
             HOME_JOINTS_SOPHIE, joint_speed=0.1
         )  # do not wait, let cameras initialize first'''
 
-        if INCLUDE_WRIST_WILSON:
-            logger.info("Creating Wilson wrist camera publisher.")
-            self._wrist_wilson_camera_publisher = RGBCameraPublisher(
-                partial(CameraFactory.create_wrist_camera, serial_number=WRIST_WILSON_REALSENSE_SERIAL),
-                WRIST_WILSON_CAM_RGB_TOPIC,
-                WRIST_WILSON_CAM_RESOLUTION_TOPIC,
-                100,
-            )
-            self._wrist_wilson_camera_publisher.start()
+        logger.info("Creating Wilson wrist camera publisher.")
+        self._wrist_wilson_camera_publisher = RGBCameraPublisher(
+            partial(CameraFactory.create_wrist_camera, serial_number=WRIST_WILSON_REALSENSE_SERIAL),
+            WRIST_WILSON_CAM_RGB_TOPIC,
+            WRIST_WILSON_CAM_RESOLUTION_TOPIC,
+            100,
+        )
+        self._wrist_wilson_camera_publisher.start()
 
-            logger.info("Creating Wilson wrist camera subscriber.")
-            self._wrist_wilson_camera_subscriber = RGBCameraSubscriber(
-                WRIST_WILSON_CAM_RESOLUTION_TOPIC,
-                WRIST_WILSON_CAM_RGB_TOPIC,
-            )
-
-        if INCLUDE_WRIST_SOPHIE:
-            logger.info("Creating Sophie wrist camera publisher.")
-            self._wrist_sophie_camera_publisher = RGBCameraPublisher(
-                partial(CameraFactory.create_wrist_camera, serial_number=WRIST_SOPHIE_REALSENSE_SERIAL),
-                WRIST_SOPHIE_CAM_RGB_TOPIC,
-                WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
-                100,
-            )
-            self._wrist_sophie_camera_publisher.start()
-
-            logger.info("Creating Sophie wrist camera subscriber.")
-            self._wrist_sophie_camera_subscriber = RGBCameraSubscriber(
-                WRIST_SOPHIE_CAM_RESOLUTION_TOPIC,
-                WRIST_SOPHIE_CAM_RGB_TOPIC,
-            )
+        logger.info("Creating Wilson wrist camera subscriber.")
+        self._wrist_wilson_camera_subscriber = RGBCameraSubscriber(
+            WRIST_WILSON_CAM_RESOLUTION_TOPIC,
+            WRIST_WILSON_CAM_RGB_TOPIC,
+        )
 
         logger.info("Creating scene camera publisher.")
         self._scene_camera_publisher = RGBCameraPublisher(
@@ -230,24 +213,18 @@ class UR5eStation(BaseEnv):
 
     def get_observations(self):
         start_time = time.time()
-        if INCLUDE_WRIST_WILSON:
-            wrist_wilson_image = self._wrist_wilson_camera_subscriber.get_rgb_image_as_int()
-        else:
-            wrist_wilson_image = np.zeros((720,1280,3), dtype=np.uint8)
-        if INCLUDE_WRIST_SOPHIE:
-            wrist_sophie_image = self._wrist_sophie_camera_subscriber.get_rgb_image_as_int()
-        else:
-            wrist_sophie_image = np.zeros((720,1280,3), dtype=np.uint8)
-        scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()
-        
-        wrist_wilson_image_resized = cv2.resize(wrist_wilson_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
-        wrist_sophie_image_resized = cv2.resize(wrist_sophie_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
-        scene_image_resized = cv2.resize(scene_image, (1280, 720), interpolation=cv2.INTER_CUBIC)
+        wrist_wilson_image = self._wrist_wilson_camera_subscriber.get_rgb_image_as_int()
+        scene_image = self._scene_camera_subscriber.get_rgb_image_as_int()  # TODO: this should already be a 
+        # Torch tensor (with proper dimension permutation), so that there's no difference between
+        # what get_observations returns and what is loaded from a stored raw dataset.
+    
 
         teleop_robot_joints = self.teleop_robot.get_joint_configuration().astype(np.float32)  # set to joint configuration
         gripper_states = self.get_gripper_openings()
         gripper_on_static_robot = np.array([gripper_states["gripper_on_static_robot"]]).astype(np.float32)
-        clothes_hanger_values = self.clothes_hanger.read().astype(np.float32)
+        clothes_hanger_values, clothes_hanger_values_raw = self.clothes_hanger.read()
+        clothes_hanger_values = clothes_hanger_values.astype(np.float32)
+        clothes_hanger_values_raw = clothes_hanger_values_raw.astype(np.float32)
         if self.clothes_hanger_spoof:
             clothes_hanger_spoof_values = self.clothes_hanger_spoof.read(scene_img=scene_image, wrist_img=wrist_wilson_image)
         else:
@@ -264,9 +241,15 @@ class UR5eStation(BaseEnv):
             "teleop_robot_joints": teleop_robot_joints,
             "hold_robot_joints": self.hold_robot.get_joint_configuration().astype(np.float32),
             "clothes_hanger": clothes_hanger_values,
-            "clothes_hanger_spoof": clothes_hanger_spoof_values,
+            "clothes_hanger_spoof": clothes_hanger_spoof_values.astype(np.float32),
             "actual_timestamp": np.array([time.time() - self.init_time]).astype(np.float32),
         }
+        if self.mode == "EVAL":
+            obs_dict["clothes_hanger_raw"] = clothes_hanger_values_raw
+        elif self.mode == "DATA":
+            pass
+        else:
+            raise ValueError(f"Unknown mode {self.mode}")
 
         logger.info(f"get_observations time: {time.time() - start_time}")
 
@@ -274,7 +257,7 @@ class UR5eStation(BaseEnv):
 
     def act(self, robot_pose, gripper_pose, timestamp, disable_gripper=False, control_space="JOINT"):
 
-        assert isinstance(gripper_pose, float), "Gripper pose should be a float representing the desired gripper width."
+        assert isinstance(gripper_pose, (float, np.float32)), f"Gripper pose should be a float representing the desired gripper width. Received: {gripper_pose} of type {type(gripper_pose)}"
 
         if control_space == "TOOL":
             robot_pose_se3 = robot_pose.copy()
@@ -309,7 +292,7 @@ class UR5eStation(BaseEnv):
             if valid_pose:
                 self.teleop_robot.servo_to_tcp_pose(robot_pose_se3, duration)
         elif control_space == "JOINT":
-            robot_pose_se3 = ur5e.forward_kinematics_with_tcp(*robot_pose[:6], np.eye(4))
+            robot_pose_se3 = ur5e.forward_kinematics_with_tcp(*robot_pose[:6], np.eye(4))  # TCP not set correctly yet
 
             y_coord = robot_pose_se3[1, 3]
             z_coord = robot_pose_se3[2, 3]
@@ -341,8 +324,7 @@ class UR5eStation(BaseEnv):
                 valid_pose = False'''
             if valid_pose:
                 # move robot to target pose
-                current_time = time.time()
-                duration = timestamp - current_time
+                duration = timestamp - time.time()
                 if duration < 0:
                     logger.warning("Action duration is negative, setting it to 0")
                     duration = 0
