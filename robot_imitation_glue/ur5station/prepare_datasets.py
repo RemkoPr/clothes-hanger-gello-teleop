@@ -19,7 +19,7 @@ crop_width = crop_width_range[1] - crop_width_range[0]
 resize = (2*crop_width//3, 2*crop_height//3)
 
 
-def features_transform(features, include_instr=True):
+def features_transform(features, include_instr=True, instr_as_action=False):
     features["observation.state"] = features.pop("state")
     if include_instr:
         features["observation.state"]["shape"] = (11,)
@@ -29,14 +29,17 @@ def features_transform(features, include_instr=True):
     features["observation.images.wrist_wilson_image"]["shape"] = (3, resize[1], resize[0])
     features["observation.images.scene_image"] = features.pop("scene_image")
     features["observation.images.scene_image"]["shape"] = (3, resize[1], resize[0])
-    features["action"]["shape"] = (7,)
+    if not instr_as_action:
+        features["action"]["shape"] = (7,)
+    else:
+        features["action"]["shape"] = (11,)
 
     print("processed features:")
     print(features)
     return features
 
 
-def joints_frame_transform(frame, init_frame=None, include_instr=True):
+def joints_frame_transform(frame, init_frame=None, include_instr=True, instr_as_action=False):
     current_joints = frame["teleop_robot_joints"].numpy()
     current_gripper = frame["gripper_on_static_robot"]  # convoluted expression, change to simply "frame["gripper_on_static_robot"]"
     action_joints = frame["action"][:6]  #.numpy()
@@ -59,23 +62,29 @@ def joints_frame_transform(frame, init_frame=None, include_instr=True):
         new_frame["observation.state"] = np.concatenate([current_joints, current_gripper, clothes_hanger]).astype(np.float32) 
     else:
         new_frame["observation.state"] = np.concatenate([current_joints, current_gripper]).astype(np.float32)
-    new_frame["action"] = np.concatenate([action_joints, action_gripper]).astype(np.float32)
+    if include_instr and instr_as_action:
+        raise ValueError("Cannot include instrumentation in state and also use it as action")
+    if not instr_as_action:
+        new_frame["action"] = np.concatenate([action_joints, action_gripper]).astype(np.float32)
+    else:
+        new_frame["action"] = np.concatenate([action_joints, action_gripper, clothes_hanger]).astype(np.float32)
     new_frame["observation.images.scene_image"] = scene_image
     new_frame["observation.images.wrist_wilson_image"] = wrist_wilson_image
 
     return new_frame
 
 
-INCLUDE_INSTR = True
+INCLUDE_INSTR = False
+INSTR_AS_ACTION = True
 root_dir = "datasets/b"
 transform_dataset(
     root_dir=root_dir,
-    new_root_dir=root_dir + f"-n200-PREPR-INSTR{1 if INCLUDE_INSTR else 0}",
-    transform_fn=partial(joints_frame_transform, include_instr=INCLUDE_INSTR),  # 
-    transform_features_fn=partial(features_transform, include_instr=INCLUDE_INSTR),
+    new_root_dir=root_dir + f"-n200-PREPR-INSTR{1 if INCLUDE_INSTR else 0}{'ACT' if INSTR_AS_ACTION else ''}",
+    transform_fn=partial(joints_frame_transform, include_instr=INCLUDE_INSTR, instr_as_action=INSTR_AS_ACTION),  # 
+    transform_features_fn=partial(features_transform, include_instr=INCLUDE_INSTR, instr_as_action=INSTR_AS_ACTION),
     features_to_drop=features_to_drop,
     episodes_to_drop=[21],#[i for i in range(1, 179)], #[140, 171]#
     frames_to_drop=[0],  # drop every first frame: this is the clotheshanger baseline measurement in home pose
     normalise_ch_values=True,
-    remove_corrupted_frames=False
+    remove_corrupted_frames=True
 )

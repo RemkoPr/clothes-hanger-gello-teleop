@@ -12,10 +12,10 @@ def _print_progress(current: int, total: int, label: str = "Progress") -> None:
         print()
 
 
-dataset = LeRobotDataset(repo_id="whatevs", root="datasets/b")
+dataset = LeRobotDataset(repo_id="whatevs", root="datasets/b-n150-INSTR0-250k-EVAL")
 #dataset = LeRobotDataset(repo_id="whatevs", root="datasets/b-n200-PREPR-INSTR1")
 print(f"Num episodes: {dataset.num_episodes}")
-print(dataset[0]["scene_image"].shape)
+print(dataset[0]["action"].shape)
 
 
 '''a = []

@@ -99,6 +99,7 @@ def eval(  # noqa: C901
     # Legacy singular params — kept for backward compatibility
     eval_dataset_image_key: str = None,
     env_observation_image_key: str = None,
+    instr_as_action: bool = False,
 ):
     """
     Evaluate a (policy) agent on a robot environment.
@@ -165,7 +166,8 @@ def eval(  # noqa: C901
                 env.move_teleop_robot_to_home_pose(joint_speed=0.2)
                 observation = env.get_observations()
                 recorder.start_episode()
-                recorder.record_step(observation, np.array([0] * 7).astype(np.float32))
+                action_dim = 11 if instr_as_action else 7
+                recorder.record_step(observation, np.array([0] * action_dim).astype(np.float32))
                 env.clothes_hanger.init_baseline(observation["clothes_hanger_raw"])
                 #env.clothes_hanger.init_thresholds(20)
                 policy_agent.reset()
@@ -270,6 +272,7 @@ def eval(  # noqa: C901
                 2,
             )
             rr.log("clothes_hanger", rr.Scalars(observation["clothes_hanger"]))
+            rr.log("clothes_hanger_spoof", rr.Scalars(observation["clothes_hanger_spoof"]))
             rr.log("image", rr.Image(vis_img, rr.ColorModel.RGB))
             rr.log("Init instruction", rr.Image(wrist_img, rr.ColorModel.RGB))
             for obs_key in env_observation_image_keys:
@@ -290,8 +293,8 @@ def eval(  # noqa: C901
 
             # ── Rollout phase: policy controls the robot ──────────────
             if state.rollout_active:
-                action = policy_agent.get_action(observation)
-                logger.debug(f"policy action: {action}")
+                action = policy_agent.get_action(observation, log_rerun=True)
+                rr.log("predicted_action", rr.Scalars(action))
                 '''current_scene_image = observation["scene_image"]
                 if abs(previous_scene_image - current_scene_image).mean() > 0.2:
                     logger.warning("Large scene image difference detected between steps, possible camera glitch. Not executing action and not recording this step.")

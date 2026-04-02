@@ -1,0 +1,4 @@
+gebeurt normalisatie in DP zowel bij inference als bij trainen
+random crop bijvoegen
+in predict_train obs_prepr zelf doen
+demonstratie playbacken en ook maar eens inference plotten

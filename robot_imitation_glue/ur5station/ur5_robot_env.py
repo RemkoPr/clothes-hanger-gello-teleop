@@ -17,7 +17,7 @@ from airo_teleop_agents.gello_teleop_agents import Gello4UR_ParallelGripper
 from airo_teleop_devices.gello_teleop_device import GelloTeleopDevice
 from airo_spatial_algebra.se3 import SE3Container, normalize_so3_matrix
 from ur_analytic_ik import ur5e
-from clothes_hanger import ClothesHanger, ClothesHangerMock, ClothesHangerSpoof
+from robot_imitation_glue.ur5station.clothes_hanger import ClothesHanger, ClothesHangerMock, ClothesHangerSpoof
 from functools import partial
 
 from robot_imitation_glue.base import BaseEnv
@@ -49,7 +49,7 @@ CLOTHES_HANGER_GRASP_WIDTH = BCH_GRASP_WIDTH
 INIT_GRASPS = False
 
 SCHUNK_WILSON_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0,11,115200,8E1"
-SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:13.3:1.0-port0,12,115200,8E1"
+SCHUNK_SOPHIE_PORT = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:2:1.0-port0,12,115200,8E1"
 
 HOLD_SHIRT_JOINTS_WILSON_HORIZONTAL = np.array([160, -130, 84, 44, 94, 87]) * np.pi / 180
 HOLD_SHIRT_JOINTS_WILSON_VERTICAL = np.array([157, -92, 29, -24, -91, 83]) * np.pi / 180
@@ -60,7 +60,7 @@ logger = loguru.logger
 
 
 MAX_TRANSLATION = 0.15
-MAX_JOINT_DELTA = 3 * np.pi / 180
+MAX_JOINT_DELTA = 4 * np.pi / 180
 
 class CameraFactory:
     def create_wrist_camera(serial_number):
@@ -77,8 +77,9 @@ class UR5eStation(BaseEnv):
     ACTION_SPEC = None
     PROPRIO_OBS_SPEC = None
 
-    def __init__(self, mode="DATA"):
+    def __init__(self, mode="DATA", ch="REAL"):
         self.mode = mode
+        self.ch = ch
         # set up robot and gripper
         # logger.info("connecting to gripper.")
 
@@ -103,11 +104,14 @@ class UR5eStation(BaseEnv):
         self.gripper_on_static_robot = self.gripper_wilson
 
         #ch_baseline = np.array([227, 239, 217, 211])
-        self.clothes_hanger = ClothesHanger()  # >TODO: automatically derive baseline from train set
+        self.clothes_hanger = ClothesHangerMock()  # >TODO: automatically derive baseline from train set
         if isinstance(self.clothes_hanger, ClothesHangerMock):
             logger.warning("!!! Using ClothesHangerMock, no real clothes hanger readings will be available !!!")
         self.clothes_hanger.read()  # Test if clothes hanger can be read to catch errors early
-        self.clothes_hanger_spoof = None#ClothesHangerSpoof(baseline=ch_baseline, concat_type="WIDTH")
+        if self.ch == "SPOOF":
+            self.clothes_hanger_spoof = ClothesHangerSpoof()
+        else:
+            self.clothes_hanger_spoof = None
         
         if INIT_GRASPS:
             self.gripper_on_static_robot.open()

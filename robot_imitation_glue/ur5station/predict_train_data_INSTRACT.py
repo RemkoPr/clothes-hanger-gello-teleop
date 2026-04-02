@@ -1,5 +1,3 @@
-from email import policy
-
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robot_imitation_glue.agents.lerobot_agent import LerobotAgent, make_lerobot_policy_for_inference
 import matplotlib.pyplot as plt
@@ -32,9 +30,6 @@ class EpisodeViewer:
 
         # Load policy
         policy, preprocessor, postprocessor = make_lerobot_policy_for_inference(checkpoint_path)
-        project_root = "/home/rproesma/Documents/Projects/robot_imitation_glue"
-        backbone_file_dir = project_root + "/outputs/vision_backbones/" + f"BACKBONE[b-n200-INSTR0-300k-1enc].pth"
-        policy.diffusion.rgb_encoder.backbone.load_state_dict(torch.load(backbone_file_dir))
         self.lerobot_agent = LerobotAgent(policy, preprocessor, postprocessor, "cuda", lambda x: x)
  
         # State
@@ -45,6 +40,8 @@ class EpisodeViewer:
         self.episode_to_idx = None
         self.true_actions = None
         self.pred_actions = None
+        self.clothes_hanger_obs = None
+        self.max_action_idx = 0
 
         # Matplotlib handles
         self.fig = None
@@ -90,6 +87,7 @@ class EpisodeViewer:
 
         true_actions_list = []
         pred_actions_list = []
+        clothes_hanger_list = []
         inference_times = []
         
         # Inference first frame to get an observation step loaded in the model's memory
@@ -115,10 +113,15 @@ class EpisodeViewer:
             inference_times.append(t_start.elapsed_time(t_end))
             pred_actions_list.append(np.asarray(pred))
             true_actions_list.append(np.asarray(item["action"]))
+            clothes_hanger = item.get(self.state_key_prefix + "clothes_hanger", None)
+            if clothes_hanger is not None:
+                clothes_hanger_list.append(np.asarray(clothes_hanger))
         print(f'Average inference time over episode {idx}: {np.mean(inference_times[5:]):.2f} ms +/- {np.std(inference_times[5:]):.2f} ms')
         self.true_actions = np.stack(true_actions_list)
         self.pred_actions = np.stack(pred_actions_list)
+        self.clothes_hanger_obs = np.stack(clothes_hanger_list) if clothes_hanger_list else None
         self.n = self.true_actions.shape[0]
+        self.max_action_idx = max(0, self.pred_actions.shape[1] - 1)
 
         # Loss metrics
         mse_per_joint = np.mean((self.true_actions - self.pred_actions) ** 2, axis=0)
@@ -157,7 +160,7 @@ class EpisodeViewer:
 
         # Action plot
         x = np.arange(self.n)
-        self.line_real, = self.ax_action.plot(x, self.true_actions[:, self.action_idx], label="Action", linewidth=5)
+        self.line_real, = self.ax_action.plot(x, self.get_reference_series(self.action_idx), label="Action / Obs reference", linewidth=5)
         self.line_pred, = self.ax_action.plot(x, self.pred_actions[:, self.action_idx], label="Predicted action")
         self.vline = self.ax_action.axvline(0, color="r", linestyle="--", label="Current index (relative)")
         self.ax_action.set_xlabel("Relative index (0 .. n-1)")
@@ -172,7 +175,7 @@ class EpisodeViewer:
         self.slider_idx = Slider(ax_slider_idx, 'Index', 0, max(0, self.n - 1), valinit=0, valstep=1)
 
         ax_slider_act = plt.axes([0.2, 0.20, 0.6, 0.03])
-        self.slider_act = Slider(ax_slider_act, 'Action Idx', 0, 6, valinit=self.action_idx, valstep=1)
+        self.slider_act = Slider(ax_slider_act, 'Action Idx', 0, self.max_action_idx, valinit=self.action_idx, valstep=1)
 
         # TextBox
         ax_text_ep = plt.axes([0.15, 0.05, 0.12, 0.05])
@@ -198,11 +201,24 @@ class EpisodeViewer:
     def update_action_idx(self, val):
         """When Action-Idx slider moves, update y-data."""
         idx = int(self.slider_act.val)
-        self.line_real.set_ydata(self.true_actions[:, idx])
+        self.line_real.set_ydata(self.get_reference_series(idx))
         self.line_pred.set_ydata(self.pred_actions[:, idx])
         self.ax_action.relim()
         self.ax_action.autoscale_view()
         self.fig.canvas.draw_idle()
+
+    def get_reference_series(self, idx):
+        # For action indices 8..11, compare predicted action against observation.clothes_hanger[0..3].
+        if 8 <= idx <= 11 and self.clothes_hanger_obs is not None and self.clothes_hanger_obs.shape[1] > (idx - 8):
+            return self.clothes_hanger_obs[:, idx - 8]
+
+        if self.true_actions is not None and self.true_actions.shape[1] > idx:
+            return self.true_actions[:, idx]
+
+        if self.true_actions is not None:
+            return np.zeros(self.true_actions.shape[0], dtype=float)
+
+        return np.array([], dtype=float)
 
     def set_episode(self, text):
         """Handler for episode TextBox."""
@@ -228,10 +244,10 @@ class EpisodeViewer:
             self.im_sophie.set_data(obs0[self.image_key_prefix + "wrist_sophie_image"].cpu().numpy().transpose(1, 2, 0))
 
         x = np.arange(self.n)
-        curr_action_idx = max(0, min(6, int(self.slider_act.val)))
+        curr_action_idx = max(0, min(self.max_action_idx, int(self.slider_act.val)))
         self.line_real.set_xdata(x)
         self.line_pred.set_xdata(x)
-        self.line_real.set_ydata(self.true_actions[:, curr_action_idx])
+        self.line_real.set_ydata(self.get_reference_series(curr_action_idx))
         self.line_pred.set_ydata(self.pred_actions[:, curr_action_idx])
 
         self.ax_action.set_xlim(0, max(1, self.n - 1))
@@ -244,6 +260,10 @@ class EpisodeViewer:
         self.slider_idx = Slider(self.slider_idx.ax, 'Index', 0, max(0, self.n - 1), valinit=0, valstep=1)
         self.slider_idx.on_changed(self.update_frame)
 
+        self.slider_act.ax.clear()
+        self.slider_act = Slider(self.slider_act.ax, 'Action Idx', 0, self.max_action_idx, valinit=curr_action_idx, valstep=1)
+        self.slider_act.on_changed(self.update_action_idx)
+
         self.vline.set_xdata([0, 0])
         self.fig.canvas.draw_idle()
 
@@ -255,16 +275,15 @@ if __name__ == "__main__":
     # Dataset to inference
     #root_dir = "datasets/clothes-hanger-v3p3-w426h480"
 
-    INSTR = True
-    dataset_to_inference_root_dir = f"datasets/b-n200-PREPR-INSTR{1 if INSTR else 0}"
+    dataset_to_inference_root_dir = "datasets/b-n200-PREPR-INSTR0ACT"
     
     repo_id = "repo_id"
     # Model
 
     train_dataset_path = "/storage/rproesma/clothes-hanger/" + dataset_to_inference_root_dir
-    model_checkpoint_path = f"/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/b-n200-INSTR{1 if INSTR else 0}-300k-1enc"
+    model_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/b-n200-INSTR0ACT-300k-1enc"
     
     viewer = EpisodeViewer(dataset_to_inference_root_dir, repo_id, model_checkpoint_path, train_dataset_path, dataset_type="TRAIN", model_type="INSTR", sophie_cam=False)
-    viewer.load_episode(100)
+    viewer.load_episode(99)
     viewer.init_plot()
     viewer.show()

@@ -4,16 +4,21 @@ from cyclonedds.qos import Qos
 from cyclonedds.sub import DataReader
 from cyclonedds.topic import Topic
 from cyclonedds.util import duration
+from torchvision.models import resnet18
+from lerobot.policies.diffusion.modeling_diffusion import _replace_submodules
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.diffusion.configuration_diffusion import PreTrainedConfig
+from lerobot.processor.core import TransitionKey
 from sensor_comm_dds.utils.liveliness_listener import LivelinessListener
 from sensor_comm_dds.communication.data_classes.clotheshanger import Clotheshanger
 import numpy as np
 import time
 import torch
-from soft_sensor.spatial_concat_resnet import SpatialConcatResNet
 import cv2
 from loguru import logger
 import rerun as rr
 import torchvision.transforms as transforms
+from torch import nn
 
 
 class ClothesHanger:
@@ -66,53 +71,86 @@ class ClothesHangerMock:
         pass
 
 class ClothesHangerSpoof:
-    def __init__(self, baseline=np.array([None, None, None, None]), concat_type="WIDTH"):
-        self.model = SpatialConcatResNet(pretrained=False).to("cuda")
-        self.model.load_state_dict(torch.load("/home/rproesma/Documents/Projects/ClothesHangUR/Python/soft_sensor/predict_binary/outputs/2025-09-22/spatial_concat_resnet_1.pth", map_location="cuda"))
-        self.model.eval()
-        self.concat_type = concat_type
-        self.baseline = np.array(baseline)
-        self.normalise = transforms.Normalize(mean=[0.3365, 0.3911, 0.4145], std=[0.2832, 0.2440, 0.2536])
+    def __init__(self):
+        bb_checkpoint_path = "outputs/vision_backbones/b-n200-PREPR-INSTR1-all-data/bb_b-n200-PREPR-INSTR1-all-data-epoch15.pth"
+        #bb_checkpoint_path = "outputs/vision_backbones/bb_AUG_b-n200-PREPR-INSTR1-fold1-epoch89.pth"
+        normaliser_checkpoint_path = "/home/rproesma/Documents/Projects/robot_imitation_glue/outputs/train/b-n200-INSTR1-300k-1enc"  # use pre- and postprocessors trained on INSTR1 dataset: these have stats calculated for clothes hanger values in the state
+        ckpt = torch.load(bb_checkpoint_path, map_location="cpu")
+        self.model = resnet18(weights=None)
+        self.model = _replace_submodules(
+			root_module=self.model,
+			predicate=lambda x: isinstance(x, nn.BatchNorm2d),
+			func=lambda x: nn.GroupNorm(num_groups=x.num_features // 16, num_channels=x.num_features),
+		)
+        self.model.fc = nn.Linear(self.model.fc.in_features, 4)
+        self.model.load_state_dict(ckpt["state_dict"])
+        self.model.eval().to("cuda")
+
+        normaliser_config = PreTrainedConfig.from_pretrained(normaliser_checkpoint_path)
+        preprocessor, postprocessor = make_pre_post_processors(normaliser_config, pretrained_path=normaliser_checkpoint_path)
+
+        self._preprocessor_normalizer_step = next(
+            step for step in preprocessor.steps if step.__class__.__name__ == "NormalizerProcessorStep"
+        )
+        self._postprocessor_unnormalizer_step = next(
+            step for step in postprocessor.steps if step.__class__.__name__ == "UnnormalizerProcessorStep"
+        )
+
+    def img_preprocessor(self, img, img_type, crop_width_range=(320, 960),
+                        crop_height_range=(0, 720)):
+        try:
+            crop_height = crop_height_range[1] - crop_height_range[0]
+            crop_width = crop_width_range[1] - crop_width_range[0]
+            resize = (2*crop_width//3, 2*crop_height//3)
+            if img_type == "scene_image":
+                processed_img = cv2.resize(np.array(img)[crop_height_range[0]:crop_height_range[1], crop_width_range[0]+70:crop_width_range[1]+70], resize, interpolation=cv2.INTER_LINEAR)
+            elif img_type == "wrist_wilson_image":
+                processed_img = cv2.resize(np.flip(np.array(img), axis=0)[crop_height_range[0]:crop_height_range[1], crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_LINEAR)
+            else:
+                raise ValueError(f"Unknown image type: {img_type}")
+            processed_img = torch.tensor(processed_img).float() / 255.0
+            rr.log(f"obs_prepr: {img_type}", rr.Image(processed_img))
+            return processed_img.permute(2, 0, 1).unsqueeze(0)
+        
+        except Exception as e:
+            logger.error(f"Error processing image {img}, {img.shape}: {e}")
+            raise e
 
     def read(self, scene_img, wrist_img):
         t_start = time.time()
-        scene_img = self.preprocessor(scene_img)
-        wrist_img = self.preprocessor(wrist_img)
+        scene_img = self._normalize_image("observation.images.scene_image", self.img_preprocessor(scene_img, "scene_image")).to("cuda")
+        wrist_img = self._normalize_image("observation.images.wrist_wilson_image", self.img_preprocessor(wrist_img, "wrist_wilson_image")).to("cuda")
 
-        if self.concat_type == "NONE":
-            raise NotImplementedError("No concat type not implemented for spoof sensor.")
-        elif self.concat_type == "CHANNEL":
-            img = torch.cat((scene_img, wrist_img), dim=0)
-        elif self.concat_type == "HEIGHT":
-            img = torch.cat((scene_img, wrist_img), dim=1)
-        elif self.concat_type == "WIDTH":
-            img = torch.cat((scene_img, wrist_img), dim=2)
-        #rr.log("image_for_spoofch", rr.Image(img))
-        logger.debug(f"spoof image first row: {img[0,0,:20]}")
-        img = img.float().to("cuda").unsqueeze(0)  # add batch dim
         with torch.no_grad():
-            output = self.model(img)
-            prob = torch.sigmoid(output).squeeze(0).cpu().numpy()  # remove batch dim
-            binary_prediction = (prob > 0.5)*self.baseline
-        t_end = time.time()
-        logger.info(f"Clothes hanger spoof read ({binary_prediction}) took {(t_end - t_start)*1000:.2f} ms")
-        return binary_prediction.astype(np.float32)
-    
-    def preprocessor(self, img):
-        crop_width_range = (320+70, 960-70)
-        crop_width = crop_width_range[1] - crop_width_range[0]
-        crop_height_range = (0, 720)
-        crop_height = crop_height_range[1] - crop_height_range[0]
-        crop_width = crop_width_range[1] - crop_width_range[0]
-        resize = (crop_width, crop_height)
-        train_crop_cutoff = (0, 0)
-        
-        img = cv2.resize(np.array(img)[:, crop_width_range[0]:crop_width_range[1]], resize, interpolation=cv2.INTER_LINEAR)
-        img = np.array(img)[train_crop_cutoff[0]:-train_crop_cutoff[0] if train_crop_cutoff[0] > 0 else None, train_crop_cutoff[1]:-train_crop_cutoff[1] if train_crop_cutoff[1] > 0 else None]
-        img = torch.tensor(img).permute(2, 0, 1).float()  / 255.0  # to C,H,W
-        img = self.normalise(img)
+            try:
+                scene_output = self.model(scene_img).squeeze(0)
+                wrist_output = self.model(wrist_img).squeeze(0)
+            except Exception as e:
+                logger.error(f"Error occurred while processing images [{scene_img.shape}, {wrist_img.shape}]: {e}")
+                raise e
 
-        return img
+        # average two predictions and unnormalize
+        prediction = (scene_output + wrist_output) / 2.0
+        output = self._unnormalize_predicted_ch_values(prediction).cpu().numpy()
+        t_end = time.time()
+        logger.info(f"Clothes hanger spoof read ({output}) took {(t_end - t_start)*1000:.2f} ms")
+        return output.astype(np.float32)  #np.array([0, 0, 0, 0]).astype(np.float32)
+    
+    def _normalize_image(self, image_key: str, image: torch.Tensor) -> torch.Tensor:
+        transition = {TransitionKey.OBSERVATION.value: {image_key: image}}
+        out = self._preprocessor_normalizer_step(transition)
+        return out[TransitionKey.OBSERVATION.value][image_key]
+
+
+    def _unnormalize_predicted_ch_values(self, prediction) -> torch.Tensor:
+        post_stats = self._postprocessor_unnormalizer_step.stats
+
+        min_vals = torch.as_tensor(post_stats["observation.state"]["min"], device="cuda")[7:]
+        max_vals = torch.as_tensor(post_stats["observation.state"]["max"], device="cuda")[7:]
+        denom = max_vals - min_vals
+        denom = torch.where(denom == 0, torch.full_like(denom, 1e-8), denom)
+        # Inverse of MIN_MAX normalization from [-1, 1] back to [min, max].
+        return (prediction + 1.0) * denom / 2.0 + min_vals
 
 
 if __name__ == "__main__":

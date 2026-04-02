@@ -3,6 +3,7 @@ import time
 import numpy as np
 import torch
 from loguru import logger
+import rerun as rr
 
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from lerobot.policies.diffusion.configuration_diffusion import PreTrainedConfig
@@ -79,9 +80,11 @@ class LerobotAgent(BaseAgent):
         self.device = device
         self.observation_preprocessor = observation_preprocessor
 
-    def get_action(self, observation):
+    def get_action(self, observation, log_rerun=False):
         start_time = time.time()
         observation = self.observation_preprocessor(observation)
+        if log_rerun:
+            rr.log("state", rr.Scalars(observation["observation.state"]))
         end_time = time.time()
         logger.info(f"Lerobot agent observation preprocessor took {((end_time - start_time)*1000):.2f} ms")
         observation = {k: v.to(self.device) for k, v in observation.items()}
